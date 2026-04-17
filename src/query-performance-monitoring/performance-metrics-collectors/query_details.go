@@ -3,7 +3,6 @@ package performancemetricscollectors
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/newrelic/infra-integrations-sdk/v3/integration"
@@ -13,44 +12,6 @@ import (
 	utils "github.com/newrelic/nri-mysql/src/query-performance-monitoring/utils"
 	validator "github.com/newrelic/nri-mysql/src/query-performance-monitoring/validator"
 )
-
-// isMariaDB checks if the database is MariaDB by querying the version
-func isMariaDB(db utils.DataSource) bool {
-	const versionQuery = "SELECT VERSION() as version"
-
-	ctx, cancel := context.WithTimeout(context.Background(), constants.TimeoutDuration)
-	defer cancel()
-
-	rows, err := db.QueryxContext(ctx, versionQuery)
-	if err != nil {
-		log.Warn("Failed to check database version for MariaDB detection: %v", err)
-		return false
-	}
-	defer rows.Close()
-
-	var version struct {
-		Version string `db:"version"`
-	}
-
-	if rows.Next() {
-		if err := rows.StructScan(&version); err != nil {
-			log.Warn("Failed to scan version for MariaDB detection: %v", err)
-			return false
-		}
-
-		isMariaDBServer := strings.Contains(strings.ToLower(version.Version), "maria")
-		if isMariaDBServer {
-			log.Warn("Detected the db server is MariaDB - %s", version.Version)
-			log.Debug("Using MariaDB-compatible queries for this server")
-		} else {
-			log.Debug("Detected MySQL server: %s", version.Version)
-		}
-		return isMariaDBServer
-	}
-
-	log.Warn("Could not determine database version for MariaDB detection")
-	return false
-}
 
 // PopulateSlowQueryMetrics collects and sets slow query metrics and returns the list of query IDs
 func PopulateSlowQueryMetrics(i *integration.Integration, db utils.DataSource, args arguments.ArgumentList, excludedDatabases []string, querySet utils.QuerySet) []string {

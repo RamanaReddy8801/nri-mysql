@@ -65,10 +65,7 @@ func TestValidatePreconditions_EssentialChecksFailed(t *testing.T) {
 		{
 			name: "EssentialConsumersCheckFailed",
 			expectQueryFunc: func(mock sqlmock.Sqlmock) {
-				// checkAndEnableEssentialConsumers now calls getMySQLVersion
-				versionRows := sqlmock.NewRows([]string{"VERSION()"}).AddRow("8.0.23")
-				mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
-				mock.ExpectQuery(buildConsumerStatusQuery("8.0.23")).WillReturnError(errQueryFailed)
+				mock.ExpectQuery(buildConsumerStatusQuery()).WillReturnError(errQueryFailed)
 			},
 			assertError: false, // The function logs a warning but does not return an error
 		},
@@ -123,10 +120,7 @@ func TestCheckEssentialConsumers_ConsumerNotEnabled(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	mockDataSource := &mockDataSource{db: sqlxDB}
 
-	// checkAndEnableEssentialConsumers now calls getMySQLVersion
-	versionRows := sqlmock.NewRows([]string{"VERSION()"}).AddRow("8.0.23")
-	mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
-	mock.ExpectQuery(buildConsumerStatusQuery("8.0.23")).WillReturnRows(rows)
+	mock.ExpectQuery(buildConsumerStatusQuery()).WillReturnRows(rows)
 	err = checkAndEnableEssentialConsumers(mockDataSource)
 	assert.Error(t, err)
 }
