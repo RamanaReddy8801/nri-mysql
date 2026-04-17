@@ -48,7 +48,7 @@ func TestValidatePreconditions_PerformanceSchemaDisabled(t *testing.T) {
 	mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
 	mock.ExpectQuery(performanceSchemaQuery).WillReturnRows(rows)
 
-	err = ValidatePreconditions(mockDataSource)
+	_, err = ValidatePreconditions(mockDataSource)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "performance schema is not enabled")
 
@@ -65,7 +65,10 @@ func TestValidatePreconditions_EssentialChecksFailed(t *testing.T) {
 		{
 			name: "EssentialConsumersCheckFailed",
 			expectQueryFunc: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery(buildConsumerStatusQuery()).WillReturnError(errQueryFailed)
+				// checkAndEnableEssentialConsumers now calls getMySQLVersion
+				versionRows := sqlmock.NewRows([]string{"VERSION()"}).AddRow("8.0.23")
+				mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
+				mock.ExpectQuery(buildConsumerStatusQuery("8.0.23")).WillReturnError(errQueryFailed)
 			},
 			assertError: false, // The function logs a warning but does not return an error
 		},
@@ -85,7 +88,7 @@ func TestValidatePreconditions_EssentialChecksFailed(t *testing.T) {
 			mock.ExpectQuery(performanceSchemaQuery).WillReturnRows(performanceSchemaRows)
 			tc.expectQueryFunc(mock) // Dynamically call the query expectation function
 
-			err = ValidatePreconditions(mockDataSource)
+			_, err = ValidatePreconditions(mockDataSource)
 			if tc.assertError {
 				assert.Error(t, err)
 			} else {
@@ -120,7 +123,10 @@ func TestCheckEssentialConsumers_ConsumerNotEnabled(t *testing.T) {
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 	mockDataSource := &mockDataSource{db: sqlxDB}
 
-	mock.ExpectQuery(buildConsumerStatusQuery()).WillReturnRows(rows)
+	// checkAndEnableEssentialConsumers now calls getMySQLVersion
+	versionRows := sqlmock.NewRows([]string{"VERSION()"}).AddRow("8.0.23")
+	mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
+	mock.ExpectQuery(buildConsumerStatusQuery("8.0.23")).WillReturnRows(rows)
 	err = checkAndEnableEssentialConsumers(mockDataSource)
 	assert.Error(t, err)
 }

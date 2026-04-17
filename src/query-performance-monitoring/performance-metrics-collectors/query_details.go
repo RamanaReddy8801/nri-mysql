@@ -53,14 +53,14 @@ func isMariaDB(db utils.DataSource) bool {
 }
 
 // PopulateSlowQueryMetrics collects and sets slow query metrics and returns the list of query IDs
-func PopulateSlowQueryMetrics(i *integration.Integration, db utils.DataSource, args arguments.ArgumentList, excludedDatabases []string) []string {
+func PopulateSlowQueryMetrics(i *integration.Integration, db utils.DataSource, args arguments.ArgumentList, excludedDatabases []string, querySet utils.QuerySet) []string {
 	// Get the slow query fetch interval
 	slowQueryFetchInterval := validator.GetValidSlowQueryFetchIntervalThreshold(args.SlowQueryMonitoringFetchInterval)
 
 	// Get the query count threshold
 	queryCountThreshold := validator.GetValidQueryCountThreshold(args.QueryMonitoringCountThreshold)
 
-	rawMetrics, queryIDList, err := collectGroupedSlowQueryMetrics(db, slowQueryFetchInterval, queryCountThreshold, excludedDatabases)
+	rawMetrics, queryIDList, err := collectGroupedSlowQueryMetrics(db, slowQueryFetchInterval, queryCountThreshold, excludedDatabases, querySet.SlowQueries)
 	if err != nil {
 		log.Error("Failed to collect slow query metrics: %v", err)
 		return []string{}
@@ -82,22 +82,9 @@ func PopulateSlowQueryMetrics(i *integration.Integration, db utils.DataSource, a
 }
 
 // collectGroupedSlowQueryMetrics collects metrics from the performance schema database for slow queries
-func collectGroupedSlowQueryMetrics(db utils.DataSource, slowQueryfetchInterval int, queryCountThreshold int, excludedDatabases []string) ([]utils.SlowQueryMetrics, []string, error) {
-	// Select the appropriate query based on database type
-	var queryTemplate string
-	isMariaDBDatabase := isMariaDB(db)
-	log.Debug("Database type detection - isMariaDB: %v", isMariaDBDatabase)
-
-	if isMariaDBDatabase {
-		log.Debug("Using MariaDB-compatible slow queries")
-		queryTemplate = utils.MariaDBSlowQueries
-	} else {
-		log.Debug("Using MySQL slow queries")
-		queryTemplate = utils.SlowQueries
-	}
-
+func collectGroupedSlowQueryMetrics(db utils.DataSource, slowQueryfetchInterval int, queryCountThreshold int, excludedDatabases []string, queryText string) ([]utils.SlowQueryMetrics, []string, error) {
 	// Prepare the SQL query with the provided parameters
-	query, args, err := sqlx.In(queryTemplate, slowQueryfetchInterval, excludedDatabases, queryCountThreshold)
+	query, args, err := sqlx.In(queryText, slowQueryfetchInterval, excludedDatabases, queryCountThreshold)
 	if err != nil {
 		return nil, []string{}, err
 	}
@@ -149,9 +136,9 @@ func setSlowQueryMetrics(i *integration.Integration, metrics []utils.SlowQueryMe
 }
 
 // PopulateIndividualQueryDetails collects and sets individual query details
-func PopulateIndividualQueryDetails(db utils.DataSource, queryIDList []string, i *integration.Integration, args arguments.ArgumentList) (map[string][]utils.IndividualQueryMetrics, error) {
+func PopulateIndividualQueryDetails(db utils.DataSource, queryIDList []string, i *integration.Integration, args arguments.ArgumentList, querySet utils.QuerySet) (map[string][]utils.IndividualQueryMetrics, error) {
 	// Retrieve the list of individual queries with combined metrics
-	queryList, err := getIndividualQueryList(db, queryIDList, args)
+	queryList, err := getIndividualQueryList(db, queryIDList, args, querySet)
 	if err != nil {
 		log.Error("Failed to collect query metrics: %v", err)
 		return nil, err
@@ -173,21 +160,21 @@ func PopulateIndividualQueryDetails(db utils.DataSource, queryIDList []string, i
 }
 
 // getIndividualQueryList fetches and combines current, recent, and extensive query metrics
-func getIndividualQueryList(db utils.DataSource, queryIDList []string, args arguments.ArgumentList) ([]utils.IndividualQueryMetrics, error) {
+func getIndividualQueryList(db utils.DataSource, queryIDList []string, args arguments.ArgumentList, querySet utils.QuerySet) ([]utils.IndividualQueryMetrics, error) {
 	// Collect current query metrics from the performance schema database for the given query IDs
-	currentQueryMetrics, err := collectIndividualQueryMetrics(db, queryIDList, utils.CurrentRunningQueriesSearch, args)
+	currentQueryMetrics, err := collectIndividualQueryMetrics(db, queryIDList, querySet.CurrentRunningQueriesSearch, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect current query metrics: %w", err)
 	}
 
 	// Collect recent query metrics from the performance schema database for the given query IDs
-	recentQueryMetrics, err := collectIndividualQueryMetrics(db, queryIDList, utils.RecentQueriesSearch, args)
+	recentQueryMetrics, err := collectIndividualQueryMetrics(db, queryIDList, querySet.RecentQueriesSearch, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect recent query metrics: %w", err)
 	}
 
 	// Collect extensive query metrics from the performance schema database for the given query IDs
-	extensiveQueryMetrics, err := collectIndividualQueryMetrics(db, queryIDList, utils.PastQueriesSearch, args)
+	extensiveQueryMetrics, err := collectIndividualQueryMetrics(db, queryIDList, querySet.PastQueriesSearch, args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect extensive query metrics: %w", err)
 	}
