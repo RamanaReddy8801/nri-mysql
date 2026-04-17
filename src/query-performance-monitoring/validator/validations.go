@@ -62,10 +62,14 @@ func ValidatePreconditions(db utils.DataSource) error {
 		return err
 	}
 
-	// Check if the MySQL version is supported
-	if !isVersion8OrGreater(version) {
-		log.Error("MySQL version %s is not supported. Only version 8.0+ is supported.", version)
-		return fmt.Errorf("%w: MySQL version %s is not supported. Only version 8.0+ is supported", ErrUnsupportedMySQLVersion, version)
+	// Check if the database version is supported (MySQL 8.0+ or MariaDB 10.0+)
+	if !isSupportedDatabaseVersion(version) {
+		if isMariaDBVersion(version) {
+			log.Error("MariaDB version %s might not be fully supported. Minimum recommended version is MariaDB 10.3+", version)
+		} else {
+			log.Error("MySQL version %s is not supported. Only version 8.0+ is supported.", version)
+			return fmt.Errorf("%w: MySQL version %s is not supported. Only version 8.0+ is supported", ErrUnsupportedMySQLVersion, version)
+		}
 	}
 
 	// Check if Performance Schema is enabled
@@ -203,7 +207,15 @@ func enableViaExplicitQueries(db utils.DataSource) error {
 // If fewer than the required number of consumers are enabled, it attempts to enable them
 // via the newrelic.enable_essential_consumers_and_instruments stored procedure.
 func checkAndEnableEssentialConsumers(db utils.DataSource) error {
-	query := buildConsumerStatusQuery()
+	// Get database version to determine the appropriate consumer requirements
+	version, err := getMySQLVersion(db)
+	if err != nil {
+		log.Warn("Failed to get database version for consumer checks: %v", err)
+		// Continue with default behavior
+		version = ""
+	}
+
+	query := buildConsumerStatusQuery(version)
 	count, consumerErr := numberOfEssentialConsumersEnabled(db, query)
 
 	// If there was an error checking consumers, return it immediately
@@ -211,8 +223,16 @@ func checkAndEnableEssentialConsumers(db utils.DataSource) error {
 		return consumerErr
 	}
 
+	// Determine the required consumer count based on database type
+	requiredCount := constants.EssentialConsumersCount
+	if isMariaDBVersion(version) {
+		// MariaDB might not have events_statements_cpu consumer
+		requiredCount = constants.EssentialConsumersCount - 1
+		log.Debug("Using MariaDB-compatible consumer count: %d", requiredCount)
+	}
+
 	// If the count of enabled essential consumers is less than the required count, try to enable them
-	if count < constants.EssentialConsumersCount {
+	if count < requiredCount {
 		if err := enableEssentialConsumersAndInstruments(db); err != nil {
 			return fmt.Errorf("failed to enable essential consumers and instruments: %w", err)
 		}
@@ -264,6 +284,56 @@ func isVersion8OrGreater(version string) bool {
 	return (majorVersion >= 8)
 }
 
+// isMariaDBVersion checks if the version string indicates MariaDB
+func isMariaDBVersion(version string) bool {
+	return strings.Contains(strings.ToLower(version), "maria")
+}
+
+// isSupportedDatabaseVersion checks if the database version is supported for QPM
+// Supports MySQL 8.0+ and MariaDB 10.0+ (though MariaDB 10.3+ is recommended)
+func isSupportedDatabaseVersion(version string) bool {
+	if isMariaDBVersion(version) {
+		// For MariaDB, we're more lenient and support 10.0+
+		// Extract version from MariaDB version string like "10.5.8-MariaDB"
+		majorVersion, minorVersion := extractMariaDBVersion(version)
+		if majorVersion >= 10 {
+			if majorVersion == 10 && minorVersion < 3 {
+				log.Warn("MariaDB %d.%d detected. Version 10.3+ is recommended for optimal QPM performance", majorVersion, minorVersion)
+			}
+			return true
+		}
+		log.Debug("MariaDB major version %d is below minimum supported version 10", majorVersion)
+		return false
+	} else {
+		// For MySQL, require 8.0+
+		return isVersion8OrGreater(version)
+	}
+}
+
+// extractMariaDBVersion extracts major and minor version from MariaDB version string
+func extractMariaDBVersion(version string) (int, int) {
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		log.Warn("Malformed MariaDB version string: %s", version)
+		return 0, 0
+	}
+
+	majorVersion, err := strconv.Atoi(parts[0])
+	if err != nil {
+		log.Warn("Failed to parse MariaDB major version '%s': %v", parts[0], err)
+		return 0, 0
+	}
+
+	minorVersion, err := strconv.Atoi(parts[1])
+	if err != nil {
+		log.Warn("Failed to parse MariaDB minor version '%s': %v", parts[1], err)
+		return majorVersion, 0
+	}
+
+	log.Debug("Parsed MariaDB version: major=%d, minor=%d", majorVersion, minorVersion)
+	return majorVersion, minorVersion
+}
+
 // extractMajorFromVersion extracts the major version number from a version string.
 func extractMajorFromVersion(version string) (int, error) {
 	parts := strings.Split(version, ".")
@@ -281,7 +351,7 @@ func extractMajorFromVersion(version string) (int, error) {
 }
 
 // buildConsumerStatusQuery constructs a SQL query to check the status of essential consumers
-func buildConsumerStatusQuery() string {
+func buildConsumerStatusQuery(version string) string {
 	// List of essential consumers to check
 	consumers := []string{
 		"events_waits_current",
@@ -290,7 +360,13 @@ func buildConsumerStatusQuery() string {
 		"events_statements_history_long",
 		"events_statements_history",
 		"events_statements_current",
-		"events_statements_cpu",
+	}
+
+	// MariaDB might not have events_statements_cpu consumer
+	if !isMariaDBVersion(version) {
+		consumers = append(consumers, "events_statements_cpu")
+	} else {
+		log.Debug("Skipping events_statements_cpu consumer check for MariaDB")
 	}
 
 	query := "SELECT NAME, ENABLED FROM performance_schema.setup_consumers WHERE NAME IN ("

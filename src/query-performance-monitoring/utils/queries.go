@@ -306,4 +306,50 @@ const (
 					  blocked_txn_start_time ASC
 				  LIMIT ?;
 	`
+
+	/*
+		MariaDBSlowQueries: MariaDB-compatible version of SlowQueries without SUM_CPU_TIME.
+		MariaDB doesn't support SUM_CPU_TIME in performance_schema.events_statements_summary_by_digest,
+		so we use SUM_TIMER_WAIT as the primary performance indicator and calculate average CPU time
+		as a fraction of elapsed time when possible.
+
+		Arguments:
+		1. Interval in seconds (INT): The time period to look back for slow queries.
+		2. Excluded databases (STRING): A comma-separated list of database names to exclude from the results.
+		3. Limit (INT): The maximum number of results to return.
+	*/
+	MariaDBSlowQueries = `
+        SELECT
+			DIGEST AS query_id,
+			CASE
+				WHEN CHAR_LENGTH(DIGEST_TEXT) > 4000 THEN CONCAT(LEFT(DIGEST_TEXT, 3997), '...')
+				ELSE DIGEST_TEXT
+			END AS query_text,
+			SCHEMA_NAME AS database_name,
+			'N/A' AS schema_name,
+			COUNT_STAR AS execution_count,
+			NULL AS avg_cpu_time_ms,
+			ROUND((SUM_TIMER_WAIT / COUNT_STAR) / 1000000000, 3) AS avg_elapsed_time_ms,
+			SUM_ROWS_EXAMINED / COUNT_STAR AS avg_disk_reads,
+			SUM_ROWS_AFFECTED / COUNT_STAR AS avg_disk_writes,
+			CASE
+				WHEN SUM_NO_INDEX_USED > 0 THEN 'Yes'
+				ELSE 'No'
+			END AS has_full_table_scan,
+			CASE
+				WHEN DIGEST_TEXT LIKE 'SELECT%' THEN 'SELECT'
+				WHEN DIGEST_TEXT LIKE 'INSERT%' THEN 'INSERT'
+				WHEN DIGEST_TEXT LIKE 'UPDATE%' THEN 'UPDATE'
+				WHEN DIGEST_TEXT LIKE 'DELETE%' THEN 'DELETE'
+				ELSE 'OTHER'
+			END AS statement_type,
+			DATE_FORMAT(LAST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS last_execution_timestamp,
+			DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS collection_timestamp
+		FROM performance_schema.events_statements_summary_by_digest
+		WHERE LAST_SEEN >= UTC_TIMESTAMP() - INTERVAL ? SECOND
+			AND SCHEMA_NAME IS NOT NULL
+			AND SCHEMA_NAME NOT IN (?)
+		ORDER BY avg_elapsed_time_ms DESC
+		LIMIT ?;
+    `
 )
