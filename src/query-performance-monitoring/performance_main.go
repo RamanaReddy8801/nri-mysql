@@ -25,10 +25,12 @@ func PopulateQueryPerformanceMetrics(args arguments.ArgumentList, e *integration
 	defer db.Close()
 
 	// Validate preconditions before proceeding
-	preValidationErr := validator.ValidatePreconditions(db)
+	profile, preValidationErr := validator.ValidatePreconditions(db)
 	if preValidationErr != nil {
 		infrautils.FatalIfErr(fmt.Errorf("preconditions failed: %w", preValidationErr))
 	}
+
+	querySet := utils.GetQuerySet(profile.Flavor)
 
 	// Get the list of unique excluded databases
 	excludedDatabases := utils.GetExcludedDatabases(args.ExcludedPerformanceDatabases)
@@ -36,14 +38,14 @@ func PopulateQueryPerformanceMetrics(args arguments.ArgumentList, e *integration
 	// Populate metrics for slow queries
 	start := time.Now()
 	log.Debug("Beginning to retrieve slow query metrics")
-	queryIDList := performancemetricscollectors.PopulateSlowQueryMetrics(i, db, args, excludedDatabases)
+	queryIDList := performancemetricscollectors.PopulateSlowQueryMetrics(i, db, args, excludedDatabases, querySet)
 	log.Debug("Completed fetching slow query metrics in %v", time.Since(start))
 
 	if len(queryIDList) > 0 {
 		// Populate metrics for individual queries
 		start = time.Now()
 		log.Debug("Beginning to retrieve individual query metrics")
-		groupQueriesByDatabase, individualQueryDetailsErr := performancemetricscollectors.PopulateIndividualQueryDetails(db, queryIDList, i, args)
+		groupQueriesByDatabase, individualQueryDetailsErr := performancemetricscollectors.PopulateIndividualQueryDetails(db, queryIDList, i, args, querySet)
 		if individualQueryDetailsErr != nil {
 			log.Error("Error populating individual query details: %v", individualQueryDetailsErr)
 		}

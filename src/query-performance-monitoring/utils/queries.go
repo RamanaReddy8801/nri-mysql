@@ -48,6 +48,46 @@ const (
     `
 
 	/*
+		MariaDBSlowQueries mirrors the grouped slow query query, but avoids MySQL-only CPU fields.
+		MariaDB exposes elapsed timings in the digest summary table, while CPU timing is not consistently
+		available across supported MariaDB versions.
+	*/
+	MariaDBSlowQueries = `
+		SELECT
+			DIGEST AS query_id,
+			CASE
+				WHEN CHAR_LENGTH(DIGEST_TEXT) > 4000 THEN CONCAT(LEFT(DIGEST_TEXT, 3997), '...')
+				ELSE DIGEST_TEXT
+			END AS query_text,
+			SCHEMA_NAME AS database_name,
+			'N/A' AS schema_name,
+			COUNT_STAR AS execution_count,
+			NULL AS avg_cpu_time_ms,
+			ROUND((SUM_TIMER_WAIT / NULLIF(COUNT_STAR, 0)) / 1000000000, 3) AS avg_elapsed_time_ms,
+			SUM_ROWS_EXAMINED / NULLIF(COUNT_STAR, 0) AS avg_disk_reads,
+			SUM_ROWS_AFFECTED / NULLIF(COUNT_STAR, 0) AS avg_disk_writes,
+			CASE
+				WHEN SUM_NO_INDEX_USED > 0 THEN 'Yes'
+				ELSE 'No'
+			END AS has_full_table_scan,
+			CASE
+				WHEN DIGEST_TEXT LIKE 'SELECT%' THEN 'SELECT'
+				WHEN DIGEST_TEXT LIKE 'INSERT%' THEN 'INSERT'
+				WHEN DIGEST_TEXT LIKE 'UPDATE%' THEN 'UPDATE'
+				WHEN DIGEST_TEXT LIKE 'DELETE%' THEN 'DELETE'
+				ELSE 'OTHER'
+			END AS statement_type,
+			DATE_FORMAT(LAST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS last_execution_timestamp,
+			DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS collection_timestamp
+		FROM performance_schema.events_statements_summary_by_digest
+		WHERE LAST_SEEN >= UTC_TIMESTAMP() - INTERVAL ? SECOND
+			AND SCHEMA_NAME IS NOT NULL
+			AND SCHEMA_NAME NOT IN (?)
+		ORDER BY avg_elapsed_time_ms DESC
+		LIMIT ?;
+	`
+
+	/*
 		CurrentRunningQueriesSearch: Fetches current running queries that match a specific digest.
 		Useful for real-time monitoring of active query execution, enabling the identification
 		of long-running queries that may need intervention to maintain system performance.

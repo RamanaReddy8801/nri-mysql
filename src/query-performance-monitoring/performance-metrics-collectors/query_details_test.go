@@ -182,13 +182,14 @@ func TestPopulateSlowQueryMetrics(t *testing.T) {
 		QueryMonitoringCountThreshold:    10,
 	}
 	excludedDatabases := []string{}
+	querySet := utils.GetQuerySet(utils.DatabaseFlavorMySQL)
 
 	t.Run("Failure to collect slow query metrics", func(t *testing.T) {
 		mockCollectGroupedSlowQueryMetrics = func(_ utils.DataSource, fetchInterval int, queryCountThreshold int, excludedDatabases []string) ([]utils.IndividualQueryMetrics, []string, error) {
 			return nil, nil, errFailedToCollectMetrics
 		}
 
-		queryIDList := PopulateSlowQueryMetrics(i, mockDB, args, excludedDatabases)
+		queryIDList := PopulateSlowQueryMetrics(i, mockDB, args, excludedDatabases, querySet)
 		assert.Empty(t, queryIDList)
 	})
 
@@ -197,7 +198,7 @@ func TestPopulateSlowQueryMetrics(t *testing.T) {
 			return []utils.IndividualQueryMetrics{}, []string{}, nil
 		}
 
-		queryIDList := PopulateSlowQueryMetrics(i, mockDB, args, excludedDatabases)
+		queryIDList := PopulateSlowQueryMetrics(i, mockDB, args, excludedDatabases, querySet)
 		assert.Empty(t, queryIDList)
 	})
 
@@ -225,7 +226,7 @@ func TestPopulateSlowQueryMetrics(t *testing.T) {
 			return errFailedToSetMetrics
 		}
 
-		queryIDList := PopulateSlowQueryMetrics(i, mockDB, args, excludedDatabases)
+		queryIDList := PopulateSlowQueryMetrics(i, mockDB, args, excludedDatabases, querySet)
 		assert.Empty(t, queryIDList)
 	})
 }
