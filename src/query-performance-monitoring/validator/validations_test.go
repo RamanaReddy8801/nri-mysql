@@ -8,6 +8,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/jmoiron/sqlx"
 	constants "github.com/newrelic/nri-mysql/src/query-performance-monitoring/constants"
+	"github.com/newrelic/nri-mysql/src/query-performance-monitoring/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -455,4 +456,220 @@ func TestGetValidQueryCountThreshold(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// MariaDB-specific validation tests
+func TestValidatePreconditions_MariaDB(t *testing.T) {
+	tests := []struct {
+		name           string
+		version        string
+		performanceOn  bool
+		consumersEnabled int
+		expectError    bool
+		expectedProfile utils.DatabaseProfile
+		expectZeroValue bool
+	}{
+		{
+			name:          "MariaDB 10.6 with performance schema enabled",
+			version:       "10.6.0-MariaDB",
+			performanceOn: true,
+			consumersEnabled: 5,
+			expectError:   false,
+			expectedProfile: utils.DatabaseProfile{
+				Flavor:     utils.DatabaseFlavorMariaDB,
+				RawVersion: "10.6.0-MariaDB",
+			},
+			expectZeroValue: false,
+		},
+		{
+			name:          "MariaDB 10.5 with performance schema enabled",
+			version:       "10.5.12-MariaDB-0ubuntu0.20.04.1",
+			performanceOn: true,
+			consumersEnabled: 5,
+			expectError:   false,
+			expectedProfile: utils.DatabaseProfile{
+				Flavor:     utils.DatabaseFlavorMariaDB,
+				RawVersion: "10.5.12-MariaDB-0ubuntu0.20.04.1",
+			},
+			expectZeroValue: false,
+		},
+		{
+			name:          "MariaDB with performance schema disabled",
+			version:       "10.6.0-MariaDB",
+			performanceOn: false,
+			expectError:   true,
+			expectZeroValue: true,
+		},
+		{
+			name:          "MySQL 8.0 for comparison",
+			version:       "8.0.23",
+			performanceOn: true,
+			consumersEnabled: 5,
+			expectError:   false,
+			expectedProfile: utils.DatabaseProfile{
+				Flavor:     utils.DatabaseFlavorMySQL,
+				RawVersion: "8.0.23",
+			},
+			expectZeroValue: false,
+		},
+		{
+			name:          "MySQL 5.7 should fail version check",
+			version:       "5.7.31",
+			performanceOn: false, // Doesn't matter - version check fails first
+			expectError:   true,
+			expectZeroValue: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+			assert.NoError(t, err)
+			defer db.Close()
+
+			sqlxDB := sqlx.NewDb(db, "sqlmock")
+			mockDataSource := &mockDataSource{db: sqlxDB}
+
+			// Setup version query
+			versionRows := sqlmock.NewRows([]string{"VERSION()"}).AddRow(tt.version)
+			mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
+
+			// MySQL 5.7 fails version check early, so no further queries expected
+			if tt.version == "5.7.31" {
+				// No further mock expectations - function returns early
+			} else {
+				// Setup performance schema query if needed
+				if tt.performanceOn {
+					performanceRows := sqlmock.NewRows([]string{"Variable_name", "Value"}).
+						AddRow("performance_schema", "ON")
+					mock.ExpectQuery(performanceSchemaQuery).WillReturnRows(performanceRows)
+
+					// Setup consumer status query for all database types (function always calls this)
+					consumerRows := sqlmock.NewRows([]string{"NAME", "ENABLED"})
+					for i := 0; i < tt.consumersEnabled; i++ {
+						consumerRows.AddRow("events_waits_current", "YES")
+					}
+					mock.ExpectQuery(buildConsumerStatusQuery()).WillReturnRows(consumerRows)
+				} else {
+					performanceRows := sqlmock.NewRows([]string{"Variable_name", "Value"}).
+						AddRow("performance_schema", "OFF")
+					mock.ExpectQuery(performanceSchemaQuery).WillReturnRows(performanceRows)
+				}
+			}
+
+			// Execute test
+			profile, err := ValidatePreconditions(mockDataSource)
+
+			// Verify results
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.expectZeroValue {
+					assert.Equal(t, utils.DatabaseProfile{}, profile)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedProfile, profile)
+			}
+
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestDatabaseFlavorDetection_ValidatePreconditions(t *testing.T) {
+	tests := []struct {
+		name            string
+		version         string
+		expectedFlavor  utils.DatabaseFlavor
+	}{
+		{
+			name:           "MariaDB detection",
+			version:        "10.6.0-MariaDB",
+			expectedFlavor: utils.DatabaseFlavorMariaDB,
+		},
+		{
+			name:           "MySQL detection",
+			version:        "8.0.23",
+			expectedFlavor: utils.DatabaseFlavorMySQL,
+		},
+		{
+			name:           "Case insensitive MariaDB detection",
+			version:        "10.6.0-mariadb",
+			expectedFlavor: utils.DatabaseFlavorMariaDB,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+			assert.NoError(t, err)
+			defer db.Close()
+
+			sqlxDB := sqlx.NewDb(db, "sqlmock")
+			mockDataSource := &mockDataSource{db: sqlxDB}
+
+			// Setup successful validation path
+			versionRows := sqlmock.NewRows([]string{"VERSION()"}).AddRow(tt.version)
+			mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
+
+			performanceRows := sqlmock.NewRows([]string{"Variable_name", "Value"}).
+				AddRow("performance_schema", "ON")
+			mock.ExpectQuery(performanceSchemaQuery).WillReturnRows(performanceRows)
+
+			// Consumer check is called for all database types
+			consumerRows := sqlmock.NewRows([]string{"NAME", "ENABLED"}).
+				AddRow("events_waits_current", "YES").
+				AddRow("events_statements_history", "YES").
+				AddRow("events_statements_current", "YES").
+				AddRow("events_statements_history_long", "YES").
+				AddRow("events_waits_history", "YES")
+			mock.ExpectQuery(buildConsumerStatusQuery()).WillReturnRows(consumerRows)
+
+			profile, err := ValidatePreconditions(mockDataSource)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedFlavor, profile.Flavor)
+			assert.Equal(t, tt.version, profile.RawVersion)
+
+			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestMariaDBVersionValidation(t *testing.T) {
+	// Test that MariaDB doesn't go through MySQL version validation
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	assert.NoError(t, err)
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	mockDataSource := &mockDataSource{db: sqlxDB}
+
+	// MariaDB version that would fail MySQL validation
+	mariadbVersion := "10.3.0-MariaDB" // This would be < 8.0 for MySQL
+
+	versionRows := sqlmock.NewRows([]string{"VERSION()"}).AddRow(mariadbVersion)
+	mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
+
+	performanceRows := sqlmock.NewRows([]string{"Variable_name", "Value"}).
+		AddRow("performance_schema", "ON")
+	mock.ExpectQuery(performanceSchemaQuery).WillReturnRows(performanceRows)
+
+	// Consumer status check is always called
+	consumerRows := sqlmock.NewRows([]string{"NAME", "ENABLED"}).
+		AddRow("events_waits_current", "YES").
+		AddRow("events_statements_history", "YES").
+		AddRow("events_statements_current", "YES").
+		AddRow("events_statements_history_long", "YES").
+		AddRow("events_waits_history", "YES")
+	mock.ExpectQuery(buildConsumerStatusQuery()).WillReturnRows(consumerRows)
+
+	profile, err := ValidatePreconditions(mockDataSource)
+
+	// Should succeed for MariaDB even with "old" version number
+	assert.NoError(t, err)
+	assert.Equal(t, utils.DatabaseFlavorMariaDB, profile.Flavor)
+	assert.Equal(t, mariadbVersion, profile.RawVersion)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
