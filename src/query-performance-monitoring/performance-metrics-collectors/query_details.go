@@ -43,9 +43,9 @@ func PopulateSlowQueryMetrics(i *integration.Integration, db utils.DataSource, a
 }
 
 // collectGroupedSlowQueryMetrics collects metrics from the performance schema database for slow queries
-func collectGroupedSlowQueryMetrics(db utils.DataSource, slowQueryfetchInterval int, queryCountThreshold int, excludedDatabases []string, queryText string) ([]utils.SlowQueryMetrics, []string, error) {
+func collectGroupedSlowQueryMetrics(db utils.DataSource, slowQueryfetchInterval int, queryCountThreshold int, excludedDatabases []string, collectionQuery string) ([]utils.SlowQueryMetrics, []string, error) {
 	// Prepare the SQL query with the provided parameters
-	query, args, err := sqlx.In(queryText, slowQueryfetchInterval, excludedDatabases, queryCountThreshold)
+	query, args, err := sqlx.In(collectionQuery, slowQueryfetchInterval, excludedDatabases, queryCountThreshold)
 	if err != nil {
 		return nil, []string{}, err
 	}
