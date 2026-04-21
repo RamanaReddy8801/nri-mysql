@@ -131,6 +131,40 @@ func TestQueryParameterConsistency(t *testing.T) {
 	assert.Equal(t, 3, mariaDBParams, "MariaDB slow query should have 3 parameters")
 }
 
+func TestMariaDBBlockingSessionsQueryStructure(t *testing.T) {
+	mariaDBQuery := GetQuerySet(DatabaseFlavorMariaDB).BlockingSessionsQuery
+	mysqlQuery := GetQuerySet(DatabaseFlavorMySQL).BlockingSessionsQuery
+
+	// MariaDB uses COALESCE to fall back to raw trx_query when DIGEST_TEXT is unavailable
+	assert.Contains(t, mariaDBQuery, "COALESCE(es_waiting.DIGEST_TEXT, r.trx_query)",
+		"MariaDB blocking query should use COALESCE with trx_query fallback for blocked_query")
+	assert.Contains(t, mariaDBQuery, "COALESCE(es_blocking.DIGEST_TEXT, b.trx_query)",
+		"MariaDB blocking query should use COALESCE with trx_query fallback for blocking_query")
+
+	// REGEXP_REPLACE must NOT appear — normalization is handled in Go, not SQL
+	assert.NotContains(t, mariaDBQuery, "REGEXP_REPLACE",
+		"MariaDB blocking query should not contain REGEXP_REPLACE; normalization is done in Go")
+
+	// MariaDB uses information_schema.innodb_lock_waits (not performance_schema.data_lock_waits)
+	assert.Contains(t, mariaDBQuery, "information_schema.innodb_lock_waits",
+		"MariaDB blocking query should use information_schema.innodb_lock_waits")
+	assert.NotContains(t, mariaDBQuery, "performance_schema.data_lock_waits",
+		"MariaDB blocking query should not use performance_schema.data_lock_waits")
+
+	// MariaDB query should have exactly 2 bind parameters (excluded DBs + limit)
+	mariaDBParams := strings.Count(mariaDBQuery, "?")
+	assert.Equal(t, 2, mariaDBParams,
+		"MariaDB blocking query should have exactly 2 bind parameters")
+
+	// MySQL uses performance_schema.data_lock_waits
+	assert.Contains(t, mysqlQuery, "performance_schema.data_lock_waits",
+		"MySQL blocking query should use performance_schema.data_lock_waits")
+
+	// MySQL does not need the trx_query COALESCE fallback
+	assert.NotContains(t, mysqlQuery, "COALESCE(es_waiting.DIGEST_TEXT, r.trx_query)",
+		"MySQL blocking query should not need trx_query fallback")
+}
+
 func TestMariaDBQueryFieldMapping(t *testing.T) {
 	querySet := GetQuerySet(DatabaseFlavorMariaDB)
 	query := querySet.SlowQueries

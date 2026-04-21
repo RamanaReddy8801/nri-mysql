@@ -190,6 +190,16 @@ func TestNormalizeQueryText(t *testing.T) {
 			input:    strPtr("UPDATE users SET name = 'Alice' WHERE id = 99 AND token = 0xFF"),
 			expected: strPtr("UPDATE users SET name = ? WHERE id = ? AND token = ?"),
 		},
+		{
+			name:     "EmptyString",
+			input:    strPtr(""),
+			expected: strPtr(""),
+		},
+		{
+			name:     "ColumnIdentifiersWithNumbers",
+			input:    strPtr("SELECT col_1, total_2 FROM t WHERE row_id = col_1"),
+			expected: strPtr("SELECT col_1, total_2 FROM t WHERE row_id = col_1"),
+		},
 	}
 
 	for _, tt := range tests {
