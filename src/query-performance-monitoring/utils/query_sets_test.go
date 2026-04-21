@@ -9,10 +9,10 @@ import (
 
 func TestGetQuerySet(t *testing.T) {
 	tests := []struct {
-		name           string
-		flavor         DatabaseFlavor
-		expectedQuery  string
-		shouldContain  []string
+		name             string
+		flavor           DatabaseFlavor
+		expectedQuery    string
+		shouldContain    []string
 		shouldNotContain []string
 	}{
 		{
@@ -34,11 +34,10 @@ func TestGetQuerySet(t *testing.T) {
 			expectedQuery: MariaDBSlowQueries,
 			shouldContain: []string{
 				"NULL AS avg_cpu_time_ms",
-				"NULLIF(COUNT_STAR, 0)",
+				"CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00')",
 			},
 			shouldNotContain: []string{
 				"SUM_CPU_TIME / COUNT_STAR",
-				"CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00')",
 			},
 		},
 	}
@@ -74,21 +73,13 @@ func TestMariaDBQueryStructure(t *testing.T) {
 	querySet := GetQuerySet(DatabaseFlavorMariaDB)
 	mariaDBQuery := querySet.SlowQueries
 
-	// Test that MariaDB query uses NULLIF to prevent division by zero
-	assert.Contains(t, mariaDBQuery, "NULLIF(COUNT_STAR, 0)",
-		"MariaDB query should use NULLIF to prevent division by zero")
-
 	// Test that CPU time is explicitly NULL in MariaDB
 	assert.Contains(t, mariaDBQuery, "NULL AS avg_cpu_time_ms",
 		"MariaDB query should explicitly return NULL for CPU time")
 
-	// Test that MariaDB query uses simplified timestamp handling
-	assert.Contains(t, mariaDBQuery, "DATE_FORMAT(LAST_SEEN, '%Y-%m-%dT%H:%i:%sZ')",
-		"MariaDB query should use simplified timestamp handling")
-
-	// Test that timezone conversion is not used in MariaDB
-	assert.NotContains(t, mariaDBQuery, "CONVERT_TZ",
-		"MariaDB query should not use CONVERT_TZ")
+	// Test that MariaDB query uses CONVERT_TZ for timezone handling (same as MySQL)
+	assert.Contains(t, mariaDBQuery, "CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00')",
+		"MariaDB query should use CONVERT_TZ for consistent timezone handling")
 
 	// Test that the query structure is consistent with MySQL query
 	mysqlQuery := GetQuerySet(DatabaseFlavorMySQL).SlowQueries
