@@ -9,16 +9,18 @@ import (
 
 func TestGetQuerySet(t *testing.T) {
 	tests := []struct {
-		name           string
-		flavor         DatabaseFlavor
-		expectedQuery  string
-		shouldContain  []string
-		shouldNotContain []string
+		name                    string
+		flavor                  DatabaseFlavor
+		expectedQuery           string
+		needsQueryNormalization bool
+		shouldContain           []string
+		shouldNotContain        []string
 	}{
 		{
-			name:          "MySQL flavor returns MySQL query with CPU time",
-			flavor:        DatabaseFlavorMySQL,
-			expectedQuery: SlowQueries,
+			name:                    "MySQL flavor returns MySQL query with CPU time",
+			flavor:                  DatabaseFlavorMySQL,
+			expectedQuery:           SlowQueries,
+			needsQueryNormalization: false,
 			shouldContain: []string{
 				"SUM_CPU_TIME / COUNT_STAR",
 				"CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00')",
@@ -29,9 +31,10 @@ func TestGetQuerySet(t *testing.T) {
 			},
 		},
 		{
-			name:          "MariaDB flavor returns MariaDB query without CPU time",
-			flavor:        DatabaseFlavorMariaDB,
-			expectedQuery: MariaDBSlowQueries,
+			name:                    "MariaDB flavor returns MariaDB query without CPU time",
+			flavor:                  DatabaseFlavorMariaDB,
+			expectedQuery:           MariaDBSlowQueries,
+			needsQueryNormalization: true,
 			shouldContain: []string{
 				"NULL AS avg_cpu_time_ms",
 				"NULLIF(COUNT_STAR, 0)",
@@ -49,6 +52,10 @@ func TestGetQuerySet(t *testing.T) {
 
 			// Verify the correct query is selected
 			assert.Equal(t, tt.expectedQuery, querySet.SlowQueries)
+
+			// Verify normalization flag is set correctly per flavor
+			assert.Equal(t, tt.needsQueryNormalization, querySet.NeedsQueryNormalization,
+				"NeedsQueryNormalization should be %v for %s", tt.needsQueryNormalization, tt.name)
 
 			// Verify the query contains expected elements
 			for _, expectedContent := range tt.shouldContain {

@@ -62,25 +62,33 @@ func TestPopulateBlockingSessionMetrics(t *testing.T) {
 	excludedDatabases := []string{"mysql", "information_schema", "performance_schema", "sys"}
 	queryCountThreshold := 10
 
+	// Get MySQL query set for testing
+	mysqlQuerySet := utils.GetQuerySet(utils.DatabaseFlavorMySQL)
+
 	t.Run("ErrorCollectingMetrics", func(t *testing.T) {
-		testErrorCollectingMetrics(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
+		testErrorCollectingMetrics(t, sqlxDB, mock, excludedDatabases, queryCountThreshold, mysqlQuerySet)
 	})
 
 	t.Run("NoMetricsCollected", func(t *testing.T) {
-		testNoMetricsCollected(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
+		testNoMetricsCollected(t, sqlxDB, mock, excludedDatabases, queryCountThreshold, mysqlQuerySet)
 	})
 
 	t.Run("SuccessfulMetricsCollection", func(t *testing.T) {
-		testSuccessfulMetricsCollection(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
+		testSuccessfulMetricsCollection(t, sqlxDB, mock, excludedDatabases, queryCountThreshold, mysqlQuerySet)
 	})
 
 	t.Run("PopulateBlockingSessionMetrics", func(t *testing.T) {
-		testPopulateBlockingSessionMetrics(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
+		testPopulateBlockingSessionMetrics(t, sqlxDB, mock, excludedDatabases, queryCountThreshold, mysqlQuerySet)
+	})
+
+	// Test MariaDB query selection
+	t.Run("MariaDB_QuerySelection", func(t *testing.T) {
+		testMariaDBQuerySelection(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
 	})
 }
 
-func testErrorCollectingMetrics(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int) {
-	query, inputArgs, err := sqlx.In(utils.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
+func testErrorCollectingMetrics(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int, querySet utils.QuerySet) {
+	query, inputArgs, err := sqlx.In(querySet.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
 	assert.NoError(t, err)
 
 	query = sqlxDB.Rebind(query)
@@ -96,8 +104,8 @@ func testErrorCollectingMetrics(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlm
 	assert.Error(t, err, "Expected error collecting metrics, got nil")
 }
 
-func testNoMetricsCollected(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int) {
-	query, inputArgs, err := sqlx.In(utils.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
+func testNoMetricsCollected(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int, querySet utils.QuerySet) {
+	query, inputArgs, err := sqlx.In(querySet.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
 	assert.NoError(t, err)
 
 	query = sqlxDB.Rebind(query)
@@ -113,8 +121,8 @@ func testNoMetricsCollected(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock,
 	assert.Empty(t, metrics)
 }
 
-func testSuccessfulMetricsCollection(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int) {
-	query, inputArgs, err := sqlx.In(utils.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
+func testSuccessfulMetricsCollection(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int, querySet utils.QuerySet) {
+	query, inputArgs, err := sqlx.In(querySet.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
 	assert.NoError(t, err)
 
 	query = sqlxDB.Rebind(query)
@@ -137,8 +145,8 @@ func testSuccessfulMetricsCollection(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock
 	assert.Len(t, metrics, 2)
 }
 
-func testPopulateBlockingSessionMetrics(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int) {
-	query, inputArgs, err := sqlx.In(utils.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
+func testPopulateBlockingSessionMetrics(t *testing.T, sqlxDB *sqlx.DB, mock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int, querySet utils.QuerySet) {
+	query, inputArgs, err := sqlx.In(querySet.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
 	assert.NoError(t, err)
 
 	query = sqlxDB.Rebind(query)
@@ -165,9 +173,27 @@ func testPopulateBlockingSessionMetrics(t *testing.T, sqlxDB *sqlx.DB, mock sqlm
 	i, _ := integration.New("test", "1.0.0")
 	argList := arguments.ArgumentList{QueryMonitoringCountThreshold: queryCountThreshold}
 
-	PopulateBlockingSessionMetrics(dataSource, i, argList, excludedDatabases)
+	PopulateBlockingSessionMetrics(dataSource, i, argList, excludedDatabases, querySet)
 
 	assert.Len(t, i.LocalEntity().Metrics, 0)
+}
+
+func testMariaDBQuerySelection(t *testing.T, _ *sqlx.DB, _ sqlmock.Sqlmock, _ []string, _ int) {
+	// Test that MariaDB uses the correct query
+	mariadbQuerySet := utils.GetQuerySet(utils.DatabaseFlavorMariaDB)
+
+	assert.Contains(t, mariadbQuerySet.BlockingSessionsQuery, "information_schema.innodb_lock_waits",
+		"MariaDB query should use information_schema.innodb_lock_waits")
+	assert.NotContains(t, mariadbQuerySet.BlockingSessionsQuery, "performance_schema.data_lock_waits",
+		"MariaDB query should not use performance_schema.data_lock_waits")
+
+	// Test that MySQL uses the correct query
+	mysqlQuerySet := utils.GetQuerySet(utils.DatabaseFlavorMySQL)
+
+	assert.Contains(t, mysqlQuerySet.BlockingSessionsQuery, "performance_schema.data_lock_waits",
+		"MySQL query should use performance_schema.data_lock_waits")
+	assert.NotContains(t, mysqlQuerySet.BlockingSessionsQuery, "information_schema.innodb_lock_waits w",
+		"MySQL query should not use information_schema.innodb_lock_waits")
 }
 
 func TestSetBlockingQueryMetrics(t *testing.T) {

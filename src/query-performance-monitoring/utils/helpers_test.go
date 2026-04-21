@@ -147,6 +147,64 @@ func TestIngestMetric(t *testing.T) {
 	})
 }
 
+func TestNormalizeQueryText(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+
+	tests := []struct {
+		name     string
+		input    *string
+		expected *string
+	}{
+		{
+			name:     "NilInput",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "AlreadyNormalized",
+			input:    strPtr("SELECT * FROM users WHERE id = ? AND name = ?"),
+			expected: strPtr("SELECT * FROM users WHERE id = ? AND name = ?"),
+		},
+		{
+			name:     "StringLiterals",
+			input:    strPtr("INSERT INTO t VALUES ('hello', 'world')"),
+			expected: strPtr("INSERT INTO t VALUES (?, ?)"),
+		},
+		{
+			name:     "NumericLiterals",
+			input:    strPtr("SELECT * FROM orders WHERE id = 42 AND status = 1"),
+			expected: strPtr("SELECT * FROM orders WHERE id = ? AND status = ?"),
+		},
+		{
+			name:     "HexLiterals",
+			input:    strPtr("SELECT * FROM t WHERE col = 0xDEADBEEF"),
+			expected: strPtr("SELECT * FROM t WHERE col = ?"),
+		},
+		{
+			name:     "DecimalLiterals",
+			input:    strPtr("SELECT * FROM orders WHERE price > 3.14 AND tax = 0.05"),
+			expected: strPtr("SELECT * FROM orders WHERE price > ? AND tax = ?"),
+		},
+		{
+			name:     "MixedLiterals",
+			input:    strPtr("UPDATE users SET name = 'Alice' WHERE id = 99 AND token = 0xFF"),
+			expected: strPtr("UPDATE users SET name = ? WHERE id = ? AND token = ?"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := NormalizeQueryText(tt.input)
+			if tt.expected == nil {
+				assert.Nil(t, result)
+			} else {
+				assert.NotNil(t, result)
+				assert.Equal(t, *tt.expected, *result)
+			}
+		})
+	}
+}
+
 func TestGetExcludedDatabases(t *testing.T) {
 	type testCase struct {
 		Name              string   `json:"name"`

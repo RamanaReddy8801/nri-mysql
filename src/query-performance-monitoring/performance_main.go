@@ -71,7 +71,7 @@ func PopulateQueryPerformanceMetrics(args arguments.ArgumentList, e *integration
 	// Populate blocking session metrics
 	start = time.Now()
 	log.Debug("Beginning to retrieve blocking session metrics")
-	performancemetricscollectors.PopulateBlockingSessionMetrics(db, i, args, excludedDatabases)
+	performancemetricscollectors.PopulateBlockingSessionMetrics(db, i, args, excludedDatabases, querySet)
 	log.Debug("Completed fetching blocking session metrics in %v", time.Since(start))
 	log.Debug("Query analysis completed.")
 }

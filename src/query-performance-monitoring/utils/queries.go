@@ -255,6 +255,7 @@ const (
 			jd.wait_event_name,
 			CASE
 				WHEN jd.wait_event_name LIKE 'wait/io/file/innodb/%' THEN 'InnoDB File IO'
+				WHEN jd.wait_event_name LIKE 'wait/io/file/aria/%' THEN 'Aria File IO'
 				WHEN jd.wait_event_name LIKE 'wait/io/file/sql/%' THEN 'SQL File IO'
 				WHEN jd.wait_event_name LIKE 'wait/io/socket/%' THEN 'Network IO'
 				WHEN jd.wait_event_name LIKE 'wait/synch/cond/%' THEN 'Condition Wait'
@@ -345,5 +346,65 @@ const (
 				  ORDER BY 
 					  blocked_txn_start_time ASC
 				  LIMIT ?;
+	`
+
+	/*
+		MariaDBBlockingSessionsQuery: MariaDB-compatible version of BlockingSessionsQuery.
+		Uses LEFT JOIN for events tables and SQL-level query normalization to match MySQL behavior.
+		When DIGEST_TEXT is unavailable, normalizes trx_query by replacing literals with ? placeholders.
+		Uses information_schema.innodb_lock_waits instead of performance_schema.data_lock_waits.
+
+		Arguments:
+		1. Excluded databases (STRING): A comma-separated list of database names to exclude from the results.
+		2. Limit (INT): The maximum number of results to return.
+	*/
+	MariaDBBlockingSessionsQuery = `
+		SELECT
+			r.trx_id AS blocked_txn_id,
+			r.trx_mysql_thread_id AS blocked_thread_id,
+			wt.PROCESSLIST_ID AS blocked_pid,
+			wt.PROCESSLIST_HOST AS blocked_host,
+			wt.PROCESSLIST_DB AS database_name,
+			wt.PROCESSLIST_STATE AS blocked_status,
+			b.trx_id AS blocking_txn_id,
+			b.trx_mysql_thread_id AS blocking_thread_id,
+			bt.PROCESSLIST_ID AS blocking_pid,
+			bt.PROCESSLIST_HOST AS blocking_host,
+			COALESCE(es_waiting.DIGEST_TEXT, r.trx_query) AS blocked_query,
+			COALESCE(es_blocking.DIGEST_TEXT, b.trx_query) AS blocking_query,
+			COALESCE(es_waiting.DIGEST, MD5(COALESCE(r.trx_query, ''))) AS blocked_query_id,
+			COALESCE(es_blocking.DIGEST, MD5(COALESCE(b.trx_query, ''))) AS blocking_query_id,
+			bt.PROCESSLIST_STATE AS blocking_status,
+			ROUND(COALESCE(esc_waiting.TIMER_WAIT, 0) / 1000000000, 3) AS blocked_query_time_ms,
+			ROUND(COALESCE(esc_blocking.TIMER_WAIT, 0) / 1000000000, 3) AS blocking_query_time_ms,
+			DATE_FORMAT(CONVERT_TZ(r.trx_started, @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS blocked_txn_start_time,
+			DATE_FORMAT(CONVERT_TZ(b.trx_started, @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS blocking_txn_start_time,
+			DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS collection_timestamp
+		FROM
+			information_schema.innodb_lock_waits w
+		JOIN
+			information_schema.innodb_trx r ON r.trx_id = w.requesting_trx_id
+		JOIN
+			information_schema.innodb_trx b ON b.trx_id = w.blocking_trx_id
+		JOIN
+			performance_schema.threads wt ON wt.PROCESSLIST_ID = r.trx_mysql_thread_id
+		JOIN
+			performance_schema.threads bt ON bt.PROCESSLIST_ID = b.trx_mysql_thread_id
+		LEFT JOIN
+			performance_schema.events_statements_current esc_waiting ON esc_waiting.THREAD_ID = wt.THREAD_ID
+		LEFT JOIN
+			performance_schema.events_statements_summary_by_digest es_waiting
+			ON esc_waiting.DIGEST = es_waiting.DIGEST AND esc_waiting.DIGEST IS NOT NULL
+		LEFT JOIN
+			performance_schema.events_statements_current esc_blocking ON esc_blocking.THREAD_ID = bt.THREAD_ID
+		LEFT JOIN
+			performance_schema.events_statements_summary_by_digest es_blocking
+			ON esc_blocking.DIGEST = es_blocking.DIGEST AND esc_blocking.DIGEST IS NOT NULL
+		WHERE
+			wt.PROCESSLIST_DB IS NOT NULL
+			AND wt.PROCESSLIST_DB NOT IN (?)
+		ORDER BY
+			blocked_txn_start_time ASC
+		LIMIT ?;
 	`
 )

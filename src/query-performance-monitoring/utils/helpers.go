@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/newrelic/infra-integrations-sdk/v3/data/metric"
@@ -23,6 +24,26 @@ var (
 	ErrQueryTextEmpty  = errors.New("query text is empty")
 	ErrQueryIDNil      = errors.New("query ID is nil")
 )
+
+// Pre-compiled regexes for query normalization — compiled once at startup, reused on every call.
+var (
+	reStringLiterals  = regexp.MustCompile(`'[^']*'`)
+	reHexLiterals     = regexp.MustCompile(`\b0x[0-9a-fA-F]+\b`)
+	reNumericLiterals = regexp.MustCompile(`\b[0-9]+(?:\.[0-9]+)?\b`)
+)
+
+// NormalizeQueryText replaces string literals, hex values, and numeric literals
+// in a raw SQL query with ? placeholders, matching performance_schema DIGEST_TEXT format.
+// Returns nil if the input is nil.
+func NormalizeQueryText(query *string) *string {
+	if query == nil {
+		return nil
+	}
+	normalized := reStringLiterals.ReplaceAllString(*query, "?")
+	normalized = reHexLiterals.ReplaceAllString(normalized, "?")
+	normalized = reNumericLiterals.ReplaceAllString(normalized, "?")
+	return &normalized
+}
 
 func CreateMetricSet(e *integration.Entity, sampleName string, args arguments.ArgumentList) *metric.Set {
 	return infrautils.MetricSet(
