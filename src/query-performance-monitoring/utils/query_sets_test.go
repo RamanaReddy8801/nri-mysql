@@ -135,11 +135,21 @@ func TestMariaDBBlockingSessionsQueryStructure(t *testing.T) {
 	mariaDBQuery := GetQuerySet(DatabaseFlavorMariaDB).BlockingSessionsQuery
 	mysqlQuery := GetQuerySet(DatabaseFlavorMySQL).BlockingSessionsQuery
 
+	// MariaDB uses CTE to pre-join threads + events_statements_current once for both sides
+	assert.Contains(t, mariaDBQuery, "WITH thread_stmt AS",
+		"MariaDB blocking query should use CTE thread_stmt")
+	assert.Contains(t, mariaDBQuery, "performance_schema.events_statements_current",
+		"MariaDB blocking query CTE should join events_statements_current")
+
 	// MariaDB uses COALESCE to fall back to raw trx_query when DIGEST_TEXT is unavailable
-	assert.Contains(t, mariaDBQuery, "COALESCE(es_waiting.DIGEST_TEXT, r.trx_query)",
+	assert.Contains(t, mariaDBQuery, "COALESCE(wt.DIGEST_TEXT, r.trx_query)",
 		"MariaDB blocking query should use COALESCE with trx_query fallback for blocked_query")
-	assert.Contains(t, mariaDBQuery, "COALESCE(es_blocking.DIGEST_TEXT, b.trx_query)",
+	assert.Contains(t, mariaDBQuery, "COALESCE(bt.DIGEST_TEXT, b.trx_query)",
 		"MariaDB blocking query should use COALESCE with trx_query fallback for blocking_query")
+
+	// blocking_status must never be NULL — idle-in-transaction blocking threads have NULL PROCESSLIST_STATE
+	assert.Contains(t, mariaDBQuery, "COALESCE(bt.PROCESSLIST_STATE, 'Idle in transaction')",
+		"MariaDB blocking query should default blocking_status to 'Idle in transaction' when NULL")
 
 	// REGEXP_REPLACE must NOT appear — normalization is handled in Go, not SQL
 	assert.NotContains(t, mariaDBQuery, "REGEXP_REPLACE",
