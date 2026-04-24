@@ -390,7 +390,7 @@ const (
 			COALESCE(wt.DIGEST, MD5(COALESCE(r.trx_query, ''))) AS blocked_query_id,
 			COALESCE(bt.DIGEST, MD5(COALESCE(b.trx_query, ''))) AS blocking_query_id,
 			COALESCE(bt.PROCESSLIST_STATE, 'Idle in transaction') AS blocking_status,
-			ROUND(COALESCE(wt.TIMER_WAIT, 0) / 1000000000, 3) AS blocked_query_time_ms,
+			ROUND(TIMESTAMPDIFF(MICROSECOND, r.trx_wait_started, NOW()) / 1000, 3) AS blocked_query_time_ms,
 			ROUND(COALESCE(bt.TIMER_WAIT, 0) / 1000000000, 3) AS blocking_query_time_ms,
 			DATE_FORMAT(CONVERT_TZ(r.trx_started, @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS blocked_txn_start_time,
 			DATE_FORMAT(CONVERT_TZ(b.trx_started, @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS blocking_txn_start_time,
