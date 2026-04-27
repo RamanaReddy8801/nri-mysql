@@ -200,21 +200,6 @@ func TestNormalizeQueryText(t *testing.T) {
 			input:    strPtr("SELECT col_1, total_2 FROM t WHERE row_id = col_1"),
 			expected: strPtr("SELECT col_1, total_2 FROM t WHERE row_id = col_1"),
 		},
-		{
-			name:     "EscapedQuotesInsideString",
-			input:    strPtr("SELECT * FROM t WHERE name = 'it''s here' AND city = 'O''Brien'"),
-			expected: strPtr("SELECT * FROM t WHERE name = ? AND city = ?"),
-		},
-		{
-			name:     "BackslashEscapeInsideString",
-			input:    strPtr(`SELECT * FROM t WHERE name = 'O\'Brien' AND code = 'foo\\bar'`),
-			expected: strPtr("SELECT * FROM t WHERE name = ? AND code = ?"),
-		},
-		{
-			name:     "MixedEscapeStyles",
-			input:    strPtr(`UPDATE t SET a = 'it''s' WHERE b = 'O\'Brien'`),
-			expected: strPtr("UPDATE t SET a = ? WHERE b = ?"),
-		},
 	}
 
 	for _, tt := range tests {

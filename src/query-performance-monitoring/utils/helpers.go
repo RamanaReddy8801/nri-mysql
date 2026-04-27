@@ -27,7 +27,7 @@ var (
 
 // Pre-compiled regexes for query normalization — compiled once at startup, reused on every call.
 var (
-	reStringLiterals  = regexp.MustCompile(`'(?:[^'\\]|\\.|'')*'`)
+	reStringLiterals  = regexp.MustCompile(`'[^']*'`)
 	reHexLiterals     = regexp.MustCompile(`\b0x[0-9a-fA-F]+\b`)
 	reNumericLiterals = regexp.MustCompile(`\b[0-9]+(?:\.[0-9]+)?\b`)
 )
