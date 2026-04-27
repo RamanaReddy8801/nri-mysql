@@ -48,9 +48,9 @@ const (
     `
 
 	/*
-		MariaDBSlowQueries mirrors the grouped slow query query, but avoids MySQL-only CPU fields.
-		MariaDB exposes elapsed timings in the digest summary table, while CPU timing is not consistently
-		available across supported MariaDB versions.
+		MariaDBSlowQueries mirrors the MySQL slow query, but sets CPU time to NULL.
+		The SUM_CPU_TIME field is not consistently available across MariaDB versions.
+		All other fields, including timezone handling, are identical to the MySQL query.
 	*/
 	MariaDBSlowQueries = `
 		SELECT
@@ -63,9 +63,9 @@ const (
 			'N/A' AS schema_name,
 			COUNT_STAR AS execution_count,
 			NULL AS avg_cpu_time_ms,
-			ROUND((SUM_TIMER_WAIT / NULLIF(COUNT_STAR, 0)) / 1000000000, 3) AS avg_elapsed_time_ms,
-			SUM_ROWS_EXAMINED / NULLIF(COUNT_STAR, 0) AS avg_disk_reads,
-			SUM_ROWS_AFFECTED / NULLIF(COUNT_STAR, 0) AS avg_disk_writes,
+			ROUND((SUM_TIMER_WAIT / COUNT_STAR) / 1000000000, 3) AS avg_elapsed_time_ms,
+			SUM_ROWS_EXAMINED / COUNT_STAR AS avg_disk_reads,
+			SUM_ROWS_AFFECTED / COUNT_STAR AS avg_disk_writes,
 			CASE
 				WHEN SUM_NO_INDEX_USED > 0 THEN 'Yes'
 				ELSE 'No'
@@ -77,10 +77,10 @@ const (
 				WHEN DIGEST_TEXT LIKE 'DELETE%' THEN 'DELETE'
 				ELSE 'OTHER'
 			END AS statement_type,
-			DATE_FORMAT(LAST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS last_execution_timestamp,
+			DATE_FORMAT(CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00'), '%Y-%m-%dT%H:%i:%sZ') AS last_execution_timestamp,
 			DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS collection_timestamp
 		FROM performance_schema.events_statements_summary_by_digest
-		WHERE LAST_SEEN >= UTC_TIMESTAMP() - INTERVAL ? SECOND
+		WHERE CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00') >= UTC_TIMESTAMP() - INTERVAL ? SECOND
 			AND SCHEMA_NAME IS NOT NULL
 			AND SCHEMA_NAME NOT IN (?)
 		ORDER BY avg_elapsed_time_ms DESC
