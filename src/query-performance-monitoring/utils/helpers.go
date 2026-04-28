@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/newrelic/infra-integrations-sdk/v3/data/metric"
@@ -23,6 +24,28 @@ var (
 	ErrQueryTextEmpty  = errors.New("query text is empty")
 	ErrQueryIDNil      = errors.New("query ID is nil")
 )
+
+// literalNormalizer matches SQL literal values in a single pass (same approach as nri-mssql
+// AnonymizeQueryText). Priority order matters: strings are matched first so numbers inside
+// quoted values are not double-replaced. Handles:
+//  1. Single-quoted strings — both SQL ('it''s') and MySQL backslash ('O\'Brien') escape styles
+//  2. Hex literals — 0xDEADBEEF
+//  3. Numeric literals — integers and decimals, word-bounded to skip numbers in identifiers (col_1)
+//
+// Used only for MariaDB blocking queries; MySQL DIGEST_TEXT is already normalized by
+// performance_schema so no Go-side normalization is needed there.
+var literalNormalizer = regexp.MustCompile(`'(?:[^'\\]|\\.|'')*'|0x[0-9a-fA-F]+|\b\d+(?:\.\d+)?\b`)
+
+// NormalizeQueryText replaces string literals, hex values, and numeric literals
+// in a raw SQL query with ? placeholders, matching performance_schema DIGEST_TEXT format.
+// Returns nil if the input is nil.
+func NormalizeQueryText(query *string) *string {
+	if query == nil {
+		return nil
+	}
+	normalized := literalNormalizer.ReplaceAllString(*query, "?")
+	return &normalized
+}
 
 func CreateMetricSet(e *integration.Entity, sampleName string, args arguments.ArgumentList) *metric.Set {
 	return infrautils.MetricSet(

@@ -9,16 +9,18 @@ import (
 
 func TestGetQuerySet(t *testing.T) {
 	tests := []struct {
-		name             string
-		flavor           DatabaseFlavor
-		expectedQuery    string
-		shouldContain    []string
-		shouldNotContain []string
+		name                    string
+		flavor                  DatabaseFlavor
+		expectedQuery           string
+		needsQueryNormalization bool
+		shouldContain           []string
+		shouldNotContain        []string
 	}{
 		{
-			name:          "MySQL flavor returns MySQL query with CPU time",
-			flavor:        DatabaseFlavorMySQL,
-			expectedQuery: SlowQueries,
+			name:                    "MySQL flavor returns MySQL query with CPU time",
+			flavor:                  DatabaseFlavorMySQL,
+			expectedQuery:           SlowQueries,
+			needsQueryNormalization: false,
 			shouldContain: []string{
 				"SUM_CPU_TIME / COUNT_STAR",
 				"CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00')",
@@ -29,9 +31,10 @@ func TestGetQuerySet(t *testing.T) {
 			},
 		},
 		{
-			name:          "MariaDB flavor returns MariaDB query without CPU time",
-			flavor:        DatabaseFlavorMariaDB,
-			expectedQuery: MariaDBSlowQueries,
+			name:                    "MariaDB flavor returns MariaDB query without CPU time",
+			flavor:                  DatabaseFlavorMariaDB,
+			expectedQuery:           MariaDBSlowQueries,
+			needsQueryNormalization: true,
 			shouldContain: []string{
 				"NULL AS avg_cpu_time_ms",
 				"CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00')",
@@ -48,6 +51,10 @@ func TestGetQuerySet(t *testing.T) {
 
 			// Verify the correct query is selected
 			assert.Equal(t, tt.expectedQuery, querySet.SlowQueries)
+
+			// Verify normalization flag is set correctly per flavor
+			assert.Equal(t, tt.needsQueryNormalization, querySet.NeedsQueryNormalization,
+				"NeedsQueryNormalization should be %v for %s", tt.needsQueryNormalization, tt.name)
 
 			// Verify the query contains expected elements
 			for _, expectedContent := range tt.shouldContain {
@@ -113,6 +120,50 @@ func TestQueryParameterConsistency(t *testing.T) {
 	// Both should have 3 parameters: interval, excluded databases, limit
 	assert.Equal(t, 3, mysqlParams, "Slow query should have 3 parameters")
 	assert.Equal(t, 3, mariaDBParams, "MariaDB slow query should have 3 parameters")
+}
+
+func TestMariaDBBlockingSessionsQueryStructure(t *testing.T) {
+	mariaDBQuery := GetQuerySet(DatabaseFlavorMariaDB).BlockingSessionsQuery
+	mysqlQuery := GetQuerySet(DatabaseFlavorMySQL).BlockingSessionsQuery
+
+	// MariaDB uses CTE to pre-join threads + events_statements_current once for both sides
+	assert.Contains(t, mariaDBQuery, "WITH thread_stmt AS",
+		"MariaDB blocking query should use CTE thread_stmt")
+	assert.Contains(t, mariaDBQuery, "performance_schema.events_statements_current",
+		"MariaDB blocking query CTE should join events_statements_current")
+
+	// MariaDB uses COALESCE to fall back to raw trx_query when DIGEST_TEXT is unavailable
+	assert.Contains(t, mariaDBQuery, "COALESCE(wt.DIGEST_TEXT, r.trx_query)",
+		"MariaDB blocking query should use COALESCE with trx_query fallback for blocked_query")
+	assert.Contains(t, mariaDBQuery, "COALESCE(bt.DIGEST_TEXT, b.trx_query)",
+		"MariaDB blocking query should use COALESCE with trx_query fallback for blocking_query")
+
+	// blocking_status must never be NULL — idle-in-transaction blocking threads have NULL PROCESSLIST_STATE
+	assert.Contains(t, mariaDBQuery, "COALESCE(bt.PROCESSLIST_STATE, 'Idle in transaction')",
+		"MariaDB blocking query should default blocking_status to 'Idle in transaction' when NULL")
+
+	// REGEXP_REPLACE must NOT appear — normalization is handled in Go, not SQL
+	assert.NotContains(t, mariaDBQuery, "REGEXP_REPLACE",
+		"MariaDB blocking query should not contain REGEXP_REPLACE; normalization is done in Go")
+
+	// MariaDB uses information_schema.innodb_lock_waits (not performance_schema.data_lock_waits)
+	assert.Contains(t, mariaDBQuery, "information_schema.innodb_lock_waits",
+		"MariaDB blocking query should use information_schema.innodb_lock_waits")
+	assert.NotContains(t, mariaDBQuery, "performance_schema.data_lock_waits",
+		"MariaDB blocking query should not use performance_schema.data_lock_waits")
+
+	// MariaDB query should have exactly 2 bind parameters (excluded DBs + limit)
+	mariaDBParams := strings.Count(mariaDBQuery, "?")
+	assert.Equal(t, 2, mariaDBParams,
+		"MariaDB blocking query should have exactly 2 bind parameters")
+
+	// MySQL uses performance_schema.data_lock_waits
+	assert.Contains(t, mysqlQuery, "performance_schema.data_lock_waits",
+		"MySQL blocking query should use performance_schema.data_lock_waits")
+
+	// MySQL does not need the trx_query COALESCE fallback
+	assert.NotContains(t, mysqlQuery, "COALESCE(es_waiting.DIGEST_TEXT, r.trx_query)",
+		"MySQL blocking query should not need trx_query fallback")
 }
 
 func TestMariaDBQueryFieldMapping(t *testing.T) {
