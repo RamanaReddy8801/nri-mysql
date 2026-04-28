@@ -45,6 +45,7 @@ var (
 	ErrNoRowsFound                = errors.New("no rows found")
 	ErrMySQLVersion               = errors.New("only MySQL version 8.0+ is supported")
 	ErrUnsupportedMySQLVersion    = errors.New("MySQL version is not supported")
+	ErrUnsupportedMariaDBVersion  = errors.New("only MariaDB version 10.2+ is supported")
 )
 
 // ConsumerStatus represents the status of a consumer in the Performance Schema.
@@ -69,6 +70,11 @@ func ValidatePreconditions(db utils.DataSource) (utils.DatabaseProfile, error) {
 	if profile.Flavor == utils.DatabaseFlavorMySQL && !isVersion8OrGreater(version) {
 		log.Error("MySQL version %s is not supported. Only version 8.0+ is supported.", version)
 		return utils.DatabaseProfile{}, fmt.Errorf("%w: MySQL version %s is not supported. Only version 8.0+ is supported", ErrUnsupportedMySQLVersion, version)
+	}
+
+	if profile.Flavor == utils.DatabaseFlavorMariaDB && !isMariaDBVersionSupported(version) {
+		log.Error("MariaDB version %s is not supported. Only version 10.2+ is supported.", version)
+		return utils.DatabaseProfile{}, fmt.Errorf("%w: MariaDB version %s is not supported. Minimum supported version is 10.2+", ErrUnsupportedMariaDBVersion, version)
 	}
 
 	// Check if Performance Schema is enabled
@@ -281,6 +287,46 @@ func extractMajorFromVersion(version string) (int, error) {
 	}
 
 	return majorVersion, nil
+}
+
+// extractMinorFromVersion extracts the minor version number from a version string.
+// It handles suffixes such as "10.6.12-MariaDB" where parts[1] is plain "6", as well
+// as edge cases like "10.2-MariaDB" where parts[1] is "2-MariaDB".
+func extractMinorFromVersion(version string) (int, error) {
+	parts := strings.Split(version, ".")
+	if len(parts) < constants.MinVersionParts {
+		return 0, ErrImproperlyFormattedVersion
+	}
+
+	// Strip any non-numeric suffix (e.g., "2-MariaDB" → "2")
+	minorStr := strings.Split(parts[1], "-")[0]
+	minorVersion, err := strconv.Atoi(minorStr)
+	if err != nil {
+		log.Error("Failed to parse minor version '%s': %v", minorStr, err)
+		return 0, err
+	}
+
+	return minorVersion, nil
+}
+
+// isMariaDBVersionSupported checks if the MariaDB version is 10.2 or greater.
+// MariaDB 10.2 is the minimum because the WaitEventsQuery uses CTEs (WITH clause)
+// which were introduced in MariaDB 10.2.
+func isMariaDBVersionSupported(version string) bool {
+	major, err := extractMajorFromVersion(version)
+	if err != nil {
+		log.Error("Failed to extract major version: %v", err)
+		return false
+	}
+	minor, err := extractMinorFromVersion(version)
+	if err != nil {
+		log.Error("Failed to extract minor version: %v", err)
+		return false
+	}
+	if major > constants.MinMariaDBMajorVersion {
+		return true
+	}
+	return major == constants.MinMariaDBMajorVersion && minor >= constants.MinMariaDBMinorVersion
 }
 
 // buildConsumerStatusQuery constructs a SQL query to check the status of essential consumers
