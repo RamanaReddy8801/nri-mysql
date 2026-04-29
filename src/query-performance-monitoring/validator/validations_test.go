@@ -494,6 +494,44 @@ func TestValidatePreconditions_MariaDB(t *testing.T) {
 			expectZeroValue: false,
 		},
 		{
+			name:          "MariaDB 10.2 minimum supported version",
+			version:       "10.2.0-MariaDB",
+			performanceOn: true,
+			consumersEnabled: 5,
+			expectError:   false,
+			expectedProfile: utils.DatabaseProfile{
+				Flavor:     utils.DatabaseFlavorMariaDB,
+				RawVersion: "10.2.0-MariaDB",
+			},
+			expectZeroValue: false,
+		},
+		{
+			name:          "MariaDB 11.x future major version",
+			version:       "11.0.2-MariaDB",
+			performanceOn: true,
+			consumersEnabled: 5,
+			expectError:   false,
+			expectedProfile: utils.DatabaseProfile{
+				Flavor:     utils.DatabaseFlavorMariaDB,
+				RawVersion: "11.0.2-MariaDB",
+			},
+			expectZeroValue: false,
+		},
+		{
+			name:            "MariaDB 10.1 unsupported version",
+			version:         "10.1.48-MariaDB",
+			performanceOn:   false,
+			expectError:     true,
+			expectZeroValue: true,
+		},
+		{
+			name:            "MariaDB 10.0 unsupported version",
+			version:         "10.0.38-MariaDB",
+			performanceOn:   false,
+			expectError:     true,
+			expectZeroValue: true,
+		},
+		{
 			name:          "MariaDB with performance schema disabled",
 			version:       "10.6.0-MariaDB",
 			performanceOn: false,
@@ -534,8 +572,13 @@ func TestValidatePreconditions_MariaDB(t *testing.T) {
 			versionRows := sqlmock.NewRows([]string{"VERSION()"}).AddRow(tt.version)
 			mock.ExpectQuery(versionQuery).WillReturnRows(versionRows)
 
-			// MySQL 5.7 fails version check early, so no further queries expected
-			if tt.version == "5.7.31" {
+			// Unsupported versions fail the version check early, so no further queries expected
+			unsupportedVersions := map[string]bool{
+				"5.7.31":          true,
+				"10.1.48-MariaDB": true,
+				"10.0.38-MariaDB": true,
+			}
+			if unsupportedVersions[tt.version] {
 				// No further mock expectations - function returns early
 			} else {
 				// Setup performance schema query if needed
@@ -632,6 +675,31 @@ func TestDatabaseFlavorDetection_ValidatePreconditions(t *testing.T) {
 			assert.Equal(t, tt.version, profile.RawVersion)
 
 			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestIsMariaDBVersionSupported(t *testing.T) {
+	tests := []struct {
+		version   string
+		supported bool
+	}{
+		{"10.2.0-MariaDB", true},   // exact minimum boundary
+		{"10.2.44-MariaDB", true},  // patch release at minimum minor
+		{"10.3.0-MariaDB", true},   // above minimum
+		{"10.6.12-MariaDB", true},  // common production version
+		{"11.0.2-MariaDB", true},   // future major version
+		{"11.4.0-MariaDB", true},   // future major, higher minor
+		{"10.1.48-MariaDB", false}, // one minor below minimum
+		{"10.0.38-MariaDB", false}, // well below minimum
+		// edge case: minor suffix style seen on some distros
+		{"10.2-MariaDB", true},
+		{"10.1-MariaDB", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			assert.Equal(t, tt.supported, isMariaDBVersionSupported(tt.version))
 		})
 	}
 }
