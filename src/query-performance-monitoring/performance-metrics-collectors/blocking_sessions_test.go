@@ -83,7 +83,7 @@ func TestPopulateBlockingSessionMetrics(t *testing.T) {
 
 	// Test MariaDB query selection
 	t.Run("MariaDB_QuerySelection", func(t *testing.T) {
-		testMariaDBQuerySelection(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
+		testMariaDBQuerySelection(t)
 	})
 
 	// Test MariaDB normalization is applied during collection
@@ -183,7 +183,7 @@ func testPopulateBlockingSessionMetrics(t *testing.T, sqlxDB *sqlx.DB, mock sqlm
 	assert.Len(t, i.LocalEntity().Metrics, 0)
 }
 
-func testMariaDBQuerySelection(t *testing.T, _ *sqlx.DB, _ sqlmock.Sqlmock, _ []string, _ int) {
+func testMariaDBQuerySelection(t *testing.T) {
 	// Test that MariaDB uses the correct query
 	mariadbQuerySet := utils.GetQuerySet(utils.DatabaseFlavorMariaDB)
 
@@ -219,6 +219,7 @@ func testMariaDBNormalizationApplied(t *testing.T, sqlxDB *sqlx.DB, sqlMock sqlm
 
 	// Return rows with raw (un-normalized) SQL in blocked_query / blocking_query
 	rawSQL := "SELECT * FROM orders WHERE customer_id = 99 AND status = 'active'"
+	wantSQL := "SELECT * FROM orders WHERE customer_id = ? AND status = ?"
 	sqlMock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(driverArgs...).WillReturnRows(
 		sqlmock.NewRows([]string{
 			"blocked_txn_id", "blocked_pid", "blocked_thread_id", "blocked_query_id", "blocked_query",
@@ -238,6 +239,19 @@ func testMariaDBNormalizationApplied(t *testing.T, sqlxDB *sqlx.DB, sqlMock sqlm
 	// PopulateBlockingSessionMetrics should normalize blocked_query / blocking_query
 	// because mariaDBQuerySet.NeedsQueryNormalization == true
 	PopulateBlockingSessionMetrics(dataSource, i, argList, excludedDatabases, mariaDBQuerySet)
+
+	// Verify the database was queried as expected (mock was consumed)
+	assert.NoError(t, sqlMock.ExpectationsWereMet(),
+		"all expected DB queries should have been executed")
+
+	// Verify that NormalizeQueryText produces the expected output for the rawSQL
+	// used in the mock row — this confirms the normalization path would transform
+	// the data that flows through this test. End-to-end normalization behaviour is
+	// also covered by TestNormalizationAppliedToBlockingMetrics.
+	normalizedRaw := utils.NormalizeQueryText(&rawSQL)
+	assert.NotNil(t, normalizedRaw)
+	assert.Equal(t, wantSQL, *normalizedRaw,
+		"NormalizeQueryText should replace literals with ? placeholders in the query used by this test")
 }
 
 // TestNormalizationAppliedToBlockingMetrics verifies that the normalization loop used inside
