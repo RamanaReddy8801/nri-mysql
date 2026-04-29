@@ -411,6 +411,26 @@ func TestPopulateExecutionPlans(t *testing.T) {
 		mockDB.AssertExpectations(t)
 		mockIntegration.AssertExpectations(t)
 	})
+
+	t.Run("Error Opening Database Connection MariaDB", func(t *testing.T) {
+		openSQLXDB = func(_ string) (*sqlx.DB, error) {
+			return nil, assert.AnError
+		}
+
+		PopulateExecutionPlans(mockDB, queryGroups, mockIntegration.Integration, mockArgs, utils.DatabaseFlavorMariaDB)
+
+		mockDB.AssertExpectations(t)
+		mockIntegration.AssertExpectations(t)
+	})
+
+	t.Run("No Metrics Collected MariaDB", func(t *testing.T) {
+		queryGroups := map[string][]utils.IndividualQueryMetrics{}
+
+		PopulateExecutionPlans(mockDB, queryGroups, mockIntegration.Integration, mockArgs, utils.DatabaseFlavorMariaDB)
+
+		mockDB.AssertExpectations(t)
+		mockIntegration.AssertExpectations(t)
+	})
 }
 
 func TestProcessSliceValue(t *testing.T) {
@@ -648,7 +668,7 @@ func TestExtractMetrics_MariaDB114CostField(t *testing.T) {
 	assert.Equal(t, "100.00", metrics[0].Filtered)
 	assert.Equal(t, "idx_salary", metrics[0].Key)
 	assert.Equal(t, "salary", metrics[0].UsedKeyParts)
-	assert.NotEmpty(t, metrics[0].QueryCost, "should extract cost from MariaDB 11.4+ flat cost field")
+	assert.Equal(t, "0.01", metrics[0].QueryCost, "should extract cost from MariaDB 11.4+ flat cost field with %.2f precision")
 }
 
 func TestExtractMetrics_MariaDB106SimpleSelect(t *testing.T) {
@@ -746,6 +766,26 @@ func TestDeduplicateJSONKeys_EmptyObject(t *testing.T) {
 	output, err := deduplicateJSONKeys(`{}`)
 	assert.NoError(t, err)
 	assert.Equal(t, "{}", output)
+}
+
+func TestDeduplicateJSONKeys_MalformedInputs(t *testing.T) {
+	// Covers the error path that processExecutionPlanMetrics hits when
+	// deduplicateJSONKeys receives malformed JSON from MariaDB EXPLAIN output.
+	malformedInputs := []struct {
+		name  string
+		input string
+	}{
+		{"unexpected token", `{"key": }`},
+		{"unterminated string", `{"key": "value"`},
+		{"unterminated object", `{`},
+		{"unterminated array", `[1, 2,`},
+	}
+	for _, tc := range malformedInputs {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := deduplicateJSONKeys(tc.input)
+			assert.Error(t, err)
+		})
+	}
 }
 
 func TestExtractMetrics_MySQLRowsExaminedTakesPrecedence(t *testing.T) {

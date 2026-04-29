@@ -333,7 +333,7 @@ func extractMetrics(js *simplejson.Json, dbPerformanceEvents []utils.QueryPlanMe
 	queryCost, _ := js.Get("cost_info").Get("query_cost").String()
 	if queryCost == "" {
 		if costVal, err := js.Get("cost").Float64(); err == nil {
-			queryCost = fmt.Sprintf("%.5f", costVal)
+			queryCost = fmt.Sprintf("%.2f", costVal)
 		}
 	}
 
@@ -347,9 +347,10 @@ func extractMetrics(js *simplejson.Json, dbPerformanceEvents []utils.QueryPlanMe
 	rowsProducedPerJoin, _ := js.Get("rows_produced_per_join").Int64()
 
 	// Filtered: MySQL uses string ("100.00"), MariaDB uses number (100)
-	filtered, _ := js.Get("filtered").String()
+	filteredJSON := js.Get("filtered")
+	filtered, _ := filteredJSON.String()
 	if filtered == "" {
-		if fVal, err := js.Get("filtered").Float64(); err == nil {
+		if fVal, err := filteredJSON.Float64(); err == nil {
 			filtered = fmt.Sprintf("%.2f", fVal)
 		}
 	}
