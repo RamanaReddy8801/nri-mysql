@@ -1,7 +1,6 @@
 package performancemetricscollectors
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -163,23 +162,20 @@ func executeExplainQuery(ctx context.Context, db utils.DataSource, queryText str
 // all but the last occurrence. This function walks the token stream and renames duplicates
 // before any json.Unmarshal call, preserving all table data.
 func deduplicateJSONKeys(jsonStr string) (string, error) {
-	dec := json.NewDecoder(bytes.NewReader([]byte(jsonStr)))
+	dec := json.NewDecoder(strings.NewReader(jsonStr))
 	dec.UseNumber()
-
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
 
 	result, err := deduplicateValue(dec)
 	if err != nil {
 		return "", fmt.Errorf("failed to deduplicate JSON keys: %w", err)
 	}
 
-	if err := enc.Encode(result); err != nil {
+	out, err := json.Marshal(result)
+	if err != nil {
 		return "", fmt.Errorf("failed to re-encode deduplicated JSON: %w", err)
 	}
 
-	return strings.TrimSpace(buf.String()), nil
+	return string(out), nil
 }
 
 // deduplicateValue reads one JSON value (object, array, or primitive) from the decoder.
@@ -205,11 +201,9 @@ func deduplicateValue(dec *json.Decoder) (interface{}, error) {
 }
 
 // deduplicateObject reads an object from the decoder, renaming duplicate keys with _N suffixes.
-func deduplicateObject(dec *json.Decoder) (json.RawMessage, error) {
+func deduplicateObject(dec *json.Decoder) (map[string]interface{}, error) {
 	keyCounts := make(map[string]int)
-	var buf bytes.Buffer
-	buf.WriteByte('{')
-	first := true
+	result := make(map[string]interface{})
 
 	for dec.More() {
 		tok, err := dec.Token()
@@ -232,31 +226,15 @@ func deduplicateObject(dec *json.Decoder) (json.RawMessage, error) {
 			key = fmt.Sprintf("%s_%d", key, count)
 		}
 
-		if !first {
-			buf.WriteByte(',')
-		}
-		first = false
-
-		keyBytes, err := json.Marshal(key)
-		if err != nil {
-			return nil, err
-		}
-		buf.Write(keyBytes)
-		buf.WriteByte(':')
-
-		valBytes, err := json.Marshal(val)
-		if err != nil {
-			return nil, err
-		}
-		buf.Write(valBytes)
+		result[key] = val
 	}
 
+	// consume closing '}'
 	if _, err := dec.Token(); err != nil {
 		return nil, err
 	}
 
-	buf.WriteByte('}')
-	return json.RawMessage(buf.Bytes()), nil
+	return result, nil
 }
 
 // deduplicateArray reads an array from the decoder, recursively processing each element.
