@@ -55,7 +55,7 @@ func PopulateQueryPerformanceMetrics(args arguments.ArgumentList, e *integration
 			// Populate execution plan details
 			start = time.Now()
 			log.Debug("Beginning to retrieve query execution plan metrics")
-			performancemetricscollectors.PopulateExecutionPlans(db, groupQueriesByDatabase, i, args)
+			performancemetricscollectors.PopulateExecutionPlans(db, groupQueriesByDatabase, i, args, profile.Flavor)
 			log.Debug("Completed fetching query execution plan metrics in %v", time.Since(start))
 		} else {
 			log.Debug("No individual query metrics to fetch.")
