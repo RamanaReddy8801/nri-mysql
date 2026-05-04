@@ -43,8 +43,9 @@ var (
 	ErrImproperlyFormattedVersion = errors.New("version string is improperly formatted")
 	ErrPerformanceSchemaDisabled  = errors.New("performance schema is not enabled")
 	ErrNoRowsFound                = errors.New("no rows found")
-	ErrMySQLVersion               = errors.New("only version 8.0+ is supported")
+	ErrMySQLVersion               = errors.New("only MySQL version 8.0+ is supported")
 	ErrUnsupportedMySQLVersion    = errors.New("MySQL version is not supported")
+	ErrUnsupportedMariaDBVersion  = errors.New("only MariaDB version 10.2+ is supported")
 )
 
 // ConsumerStatus represents the status of a consumer in the Performance Schema.
@@ -54,29 +55,37 @@ type ConsumerStatus struct {
 }
 
 // ValidatePreconditions checks if the necessary preconditions are met for performance monitoring.
-func ValidatePreconditions(db utils.DataSource) error {
-	// Get the MySQL version
+func ValidatePreconditions(db utils.DataSource) (utils.DatabaseProfile, error) {
 	version, err := getMySQLVersion(db)
 	if err != nil {
 		log.Error("Failed to get MySQL version: %v", err)
-		return err
+		return utils.DatabaseProfile{}, err
 	}
 
-	// Check if the MySQL version is supported
-	if !isVersion8OrGreater(version) {
+	profile := utils.DatabaseProfile{
+		Flavor:     utils.DetectDatabaseFlavor(version),
+		RawVersion: version,
+	}
+
+	if profile.Flavor == utils.DatabaseFlavorMySQL && !isVersion8OrGreater(version) {
 		log.Error("MySQL version %s is not supported. Only version 8.0+ is supported.", version)
-		return fmt.Errorf("%w: MySQL version %s is not supported. Only version 8.0+ is supported", ErrUnsupportedMySQLVersion, version)
+		return utils.DatabaseProfile{}, fmt.Errorf("%w: MySQL version %s is not supported. Only version 8.0+ is supported", ErrUnsupportedMySQLVersion, version)
+	}
+
+	if profile.Flavor == utils.DatabaseFlavorMariaDB && !isMariaDBVersionSupported(version) {
+		log.Error("MariaDB version %s is not supported. Only version 10.2+ is supported.", version)
+		return utils.DatabaseProfile{}, fmt.Errorf("%w: MariaDB version %s is not supported. Minimum supported version is 10.2+", ErrUnsupportedMariaDBVersion, version)
 	}
 
 	// Check if Performance Schema is enabled
 	performanceSchemaEnabled, errPerformanceEnabled := isPerformanceSchemaEnabled(db)
 	if errPerformanceEnabled != nil {
-		return errPerformanceEnabled
+		return utils.DatabaseProfile{}, errPerformanceEnabled
 	}
 
 	if !performanceSchemaEnabled {
-		logEnablePerformanceSchemaInstructions(version)
-		return ErrPerformanceSchemaDisabled
+		logEnablePerformanceSchemaInstructions(profile)
+		return utils.DatabaseProfile{}, ErrPerformanceSchemaDisabled
 	}
 
 	// Check if essential consumers are enabled
@@ -84,7 +93,7 @@ func ValidatePreconditions(db utils.DataSource) error {
 	if errEssentialConsumers != nil {
 		log.Warn("Essential consumer check failed: %v", errEssentialConsumers)
 	}
-	return nil
+	return profile, nil
 }
 
 // isPerformanceSchemaEnabled checks if the Performance Schema is enabled in the MySQL database.
@@ -223,12 +232,12 @@ func checkAndEnableEssentialConsumers(db utils.DataSource) error {
 }
 
 // logEnablePerformanceSchemaInstructions logs instructions to enable the Performance Schema.
-func logEnablePerformanceSchemaInstructions(version string) {
-	if isVersion8OrGreater(version) {
-		log.Debug("To enable the Performance Schema, add the following lines to your MySQL configuration file (my.cnf or my.ini) in the [mysqld] section and restart the MySQL server:")
+func logEnablePerformanceSchemaInstructions(profile utils.DatabaseProfile) {
+	if profile.Flavor == utils.DatabaseFlavorMariaDB || isVersion8OrGreater(profile.RawVersion) {
+		log.Debug("To enable the Performance Schema, add the following lines to your database configuration file (my.cnf or my.ini) in the [mysqld] section and restart the server:")
 		log.Debug("performance_schema=ON")
 	} else {
-		log.Error("MySQL version %s is not supported. Only version 8.0+ is supported.", version)
+		log.Error("MySQL version %s is not supported. Only version 8.0+ is supported.", profile.RawVersion)
 	}
 }
 
@@ -278,6 +287,46 @@ func extractMajorFromVersion(version string) (int, error) {
 	}
 
 	return majorVersion, nil
+}
+
+// extractMinorFromVersion extracts the minor version number from a version string.
+// It handles suffixes such as "10.6.12-MariaDB" where parts[1] is plain "6", as well
+// as edge cases like "10.2-MariaDB" where parts[1] is "2-MariaDB".
+func extractMinorFromVersion(version string) (int, error) {
+	parts := strings.Split(version, ".")
+	if len(parts) < constants.MinVersionParts {
+		return 0, ErrImproperlyFormattedVersion
+	}
+
+	// Strip any non-numeric suffix (e.g., "2-MariaDB" → "2")
+	minorStr := strings.Split(parts[1], "-")[0]
+	minorVersion, err := strconv.Atoi(minorStr)
+	if err != nil {
+		log.Error("Failed to parse minor version '%s': %v", minorStr, err)
+		return 0, err
+	}
+
+	return minorVersion, nil
+}
+
+// isMariaDBVersionSupported checks if the MariaDB version is 10.2 or greater.
+// MariaDB 10.2 is the minimum because the WaitEventsQuery uses CTEs (WITH clause)
+// which were introduced in MariaDB 10.2.
+func isMariaDBVersionSupported(version string) bool {
+	major, err := extractMajorFromVersion(version)
+	if err != nil {
+		log.Error("Failed to extract major version: %v", err)
+		return false
+	}
+	minor, err := extractMinorFromVersion(version)
+	if err != nil {
+		log.Error("Failed to extract minor version: %v", err)
+		return false
+	}
+	if major > constants.MinMariaDBMajorVersion {
+		return true
+	}
+	return major == constants.MinMariaDBMajorVersion && minor >= constants.MinMariaDBMinorVersion
 }
 
 // buildConsumerStatusQuery constructs a SQL query to check the status of essential consumers
