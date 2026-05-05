@@ -41,8 +41,8 @@ func PopulateBlockingSessionMetrics(db utils.DataSource, i *integration.Integrat
 	// anonymized by performance_schema.
 	if querySet.NeedsQueryAnonymization {
 		for i := range metrics {
-			metrics[i].BlockedQuery = utils.NormalizeQueryText(metrics[i].BlockedQuery)
-			metrics[i].BlockingQuery = utils.NormalizeQueryText(metrics[i].BlockingQuery)
+			metrics[i].BlockedQuery = utils.AnonymizeQueryText(metrics[i].BlockedQuery)
+			metrics[i].BlockingQuery = utils.AnonymizeQueryText(metrics[i].BlockingQuery)
 		}
 	}
 

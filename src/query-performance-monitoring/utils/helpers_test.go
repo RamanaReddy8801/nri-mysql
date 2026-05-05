@@ -147,7 +147,7 @@ func TestIngestMetric(t *testing.T) {
 	})
 }
 
-func TestNormalizeQueryText(t *testing.T) {
+func TestAnonymizeQueryText(t *testing.T) {
 	strPtr := func(s string) *string { return &s }
 
 	tests := []struct {
@@ -161,7 +161,7 @@ func TestNormalizeQueryText(t *testing.T) {
 			expected: nil,
 		},
 		{
-			name:     "AlreadyNormalized",
+			name:     "AlreadyAnonymized",
 			input:    strPtr("SELECT * FROM users WHERE id = ? AND name = ?"),
 			expected: strPtr("SELECT * FROM users WHERE id = ? AND name = ?"),
 		},
@@ -229,7 +229,7 @@ func TestNormalizeQueryText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := NormalizeQueryText(tt.input)
+			result := AnonymizeQueryText(tt.input)
 			if tt.expected == nil {
 				assert.Nil(t, result)
 			} else {

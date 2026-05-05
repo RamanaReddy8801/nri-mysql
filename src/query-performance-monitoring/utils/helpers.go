@@ -32,19 +32,19 @@ var (
 //  2. Hex literals — 0xDEADBEEF
 //  3. Numeric literals — integers and decimals, word-bounded to skip numbers in identifiers (col_1)
 //
-// Used only for MariaDB blocking queries; MySQL DIGEST_TEXT is already normalized by
+// Used only for MariaDB blocking queries; MySQL DIGEST_TEXT is already anonymized by
 // performance_schema so no Go-side anonymization is needed there.
 var literalAnonymizer = regexp.MustCompile(`'(?:[^'\\]|\\.|'')*'|0x[0-9a-fA-F]+|\b\d+(?:\.\d+)?\b`)
 
-// NormalizeQueryText replaces string literals, hex values, and numeric literals
+// AnonymizeQueryText replaces string literals, hex values, and numeric literals
 // in a raw SQL query with ? placeholders, matching performance_schema DIGEST_TEXT format.
 // Returns nil if the input is nil.
-func NormalizeQueryText(query *string) *string {
+func AnonymizeQueryText(query *string) *string {
 	if query == nil {
 		return nil
 	}
-	normalized := literalAnonymizer.ReplaceAllString(*query, "?")
-	return &normalized
+	anonymized := literalAnonymizer.ReplaceAllString(*query, "?")
+	return &anonymized
 }
 
 func CreateMetricSet(e *integration.Entity, sampleName string, args arguments.ArgumentList) *metric.Set {

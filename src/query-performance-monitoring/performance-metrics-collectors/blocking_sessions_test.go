@@ -260,8 +260,8 @@ func TestAnonymizationAppliedToBlockingMetrics(t *testing.T) {
 
 		// Apply the same anonymization loop as PopulateBlockingSessionMetrics
 		for i := range metrics {
-			metrics[i].BlockedQuery = utils.NormalizeQueryText(metrics[i].BlockedQuery)
-			metrics[i].BlockingQuery = utils.NormalizeQueryText(metrics[i].BlockingQuery)
+			metrics[i].BlockedQuery = utils.AnonymizeQueryText(metrics[i].BlockedQuery)
+			metrics[i].BlockingQuery = utils.AnonymizeQueryText(metrics[i].BlockingQuery)
 		}
 
 		assert.Equal(t, wantSQL, *metrics[0].BlockedQuery,
