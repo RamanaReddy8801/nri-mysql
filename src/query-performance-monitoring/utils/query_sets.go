@@ -9,10 +9,10 @@ type QuerySet struct {
 	RecentQueriesSearch         string
 	PastQueriesSearch           string
 	BlockingSessionsQuery       string
-	// NeedsQueryNormalization indicates whether blocking query texts require
-	// Go-side normalization. True for MariaDB because its trx_query fallback
-	// returns raw SQL; false for MySQL where DIGEST_TEXT is already normalized.
-	NeedsQueryNormalization bool
+	// NeedsQueryAnonymization indicates whether blocking query texts require
+	// Go-side anonymization. True for MariaDB because its trx_query fallback
+	// returns raw SQL; false for MySQL where DIGEST_TEXT is already anonymized.
+	NeedsQueryAnonymization bool
 }
 
 // GetQuerySet returns the appropriate query set based on database flavor
@@ -20,12 +20,12 @@ type QuerySet struct {
 func GetQuerySet(flavor DatabaseFlavor) QuerySet {
 	slowQuery := SlowQueries
 	blockingQuery := BlockingSessionsQuery
-	needsNormalization := false
+	needsAnonymization := false
 
 	if flavor == DatabaseFlavorMariaDB {
 		slowQuery = MariaDBSlowQueries
 		blockingQuery = MariaDBBlockingSessionsQuery
-		needsNormalization = true
+		needsAnonymization = true
 	}
 
 	// These queries are compatible with both MySQL and MariaDB
@@ -35,6 +35,6 @@ func GetQuerySet(flavor DatabaseFlavor) QuerySet {
 		RecentQueriesSearch:         RecentQueriesSearch,
 		PastQueriesSearch:           PastQueriesSearch,
 		BlockingSessionsQuery:       blockingQuery,
-		NeedsQueryNormalization:     needsNormalization,
+		NeedsQueryAnonymization:     needsAnonymization,
 	}
 }

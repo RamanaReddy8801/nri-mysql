@@ -350,8 +350,8 @@ const (
 
 	/*
 		MariaDBBlockingSessionsQuery: MariaDB-compatible version of BlockingSessionsQuery.
-		Uses LEFT JOIN for events tables and SQL-level query normalization to match MySQL behavior.
-		When DIGEST_TEXT is unavailable, normalizes trx_query by replacing literals with ? placeholders.
+		Uses LEFT JOIN for events tables and SQL-level query anonymization to match MySQL behavior.
+		When DIGEST_TEXT is unavailable, anonymizes trx_query by replacing literals with ? placeholders.
 		Uses information_schema.innodb_lock_waits instead of performance_schema.data_lock_waits.
 
 		Arguments:

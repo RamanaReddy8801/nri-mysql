@@ -12,7 +12,7 @@ func TestGetQuerySet(t *testing.T) {
 		name                    string
 		flavor                  DatabaseFlavor
 		expectedQuery           string
-		needsQueryNormalization bool
+		needsQueryAnonymization bool
 		shouldContain           []string
 		shouldNotContain        []string
 	}{
@@ -20,7 +20,7 @@ func TestGetQuerySet(t *testing.T) {
 			name:                    "MySQL flavor returns MySQL query with CPU time",
 			flavor:                  DatabaseFlavorMySQL,
 			expectedQuery:           SlowQueries,
-			needsQueryNormalization: false,
+			needsQueryAnonymization: false,
 			shouldContain: []string{
 				"SUM_CPU_TIME / COUNT_STAR",
 				"CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00')",
@@ -34,7 +34,7 @@ func TestGetQuerySet(t *testing.T) {
 			name:                    "MariaDB flavor returns MariaDB query without CPU time",
 			flavor:                  DatabaseFlavorMariaDB,
 			expectedQuery:           MariaDBSlowQueries,
-			needsQueryNormalization: true,
+			needsQueryAnonymization: true,
 			shouldContain: []string{
 				"NULL AS avg_cpu_time_ms",
 				"CONVERT_TZ(LAST_SEEN, @@session.time_zone, '+00:00')",
@@ -52,9 +52,9 @@ func TestGetQuerySet(t *testing.T) {
 			// Verify the correct query is selected
 			assert.Equal(t, tt.expectedQuery, querySet.SlowQueries)
 
-			// Verify normalization flag is set correctly per flavor
-			assert.Equal(t, tt.needsQueryNormalization, querySet.NeedsQueryNormalization,
-				"NeedsQueryNormalization should be %v for %s", tt.needsQueryNormalization, tt.name)
+			// Verify anonymization flag is set correctly per flavor
+			assert.Equal(t, tt.needsQueryAnonymization, querySet.NeedsQueryAnonymization,
+				"NeedsQueryAnonymization should be %v for %s", tt.needsQueryAnonymization, tt.name)
 
 			// Verify the query contains expected elements
 			for _, expectedContent := range tt.shouldContain {
@@ -142,9 +142,9 @@ func TestMariaDBBlockingSessionsQueryStructure(t *testing.T) {
 	assert.Contains(t, mariaDBQuery, "COALESCE(bt.PROCESSLIST_STATE, 'Idle in transaction')",
 		"MariaDB blocking query should default blocking_status to 'Idle in transaction' when NULL")
 
-	// REGEXP_REPLACE must NOT appear — normalization is handled in Go, not SQL
+	// REGEXP_REPLACE must NOT appear — anonymization is handled in Go, not SQL
 	assert.NotContains(t, mariaDBQuery, "REGEXP_REPLACE",
-		"MariaDB blocking query should not contain REGEXP_REPLACE; normalization is done in Go")
+		"MariaDB blocking query should not contain REGEXP_REPLACE; anonymization is done in Go")
 
 	// MariaDB uses information_schema.innodb_lock_waits (not performance_schema.data_lock_waits)
 	assert.Contains(t, mariaDBQuery, "information_schema.innodb_lock_waits",

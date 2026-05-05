@@ -25,7 +25,7 @@ var (
 	ErrQueryIDNil      = errors.New("query ID is nil")
 )
 
-// literalNormalizer matches SQL literal values in a single pass (same approach as nri-mssql
+// literalAnonymizer matches SQL literal values in a single pass (same approach as nri-mssql
 // AnonymizeQueryText). Priority order matters: strings are matched first so numbers inside
 // quoted values are not double-replaced. Handles:
 //  1. Single-quoted strings — both SQL ('it''s') and MySQL backslash ('O\'Brien') escape styles
@@ -33,8 +33,8 @@ var (
 //  3. Numeric literals — integers and decimals, word-bounded to skip numbers in identifiers (col_1)
 //
 // Used only for MariaDB blocking queries; MySQL DIGEST_TEXT is already normalized by
-// performance_schema so no Go-side normalization is needed there.
-var literalNormalizer = regexp.MustCompile(`'(?:[^'\\]|\\.|'')*'|0x[0-9a-fA-F]+|\b\d+(?:\.\d+)?\b`)
+// performance_schema so no Go-side anonymization is needed there.
+var literalAnonymizer = regexp.MustCompile(`'(?:[^'\\]|\\.|'')*'|0x[0-9a-fA-F]+|\b\d+(?:\.\d+)?\b`)
 
 // NormalizeQueryText replaces string literals, hex values, and numeric literals
 // in a raw SQL query with ? placeholders, matching performance_schema DIGEST_TEXT format.
@@ -43,7 +43,7 @@ func NormalizeQueryText(query *string) *string {
 	if query == nil {
 		return nil
 	}
-	normalized := literalNormalizer.ReplaceAllString(*query, "?")
+	normalized := literalAnonymizer.ReplaceAllString(*query, "?")
 	return &normalized
 }
 

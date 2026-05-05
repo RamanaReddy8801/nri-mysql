@@ -86,9 +86,9 @@ func TestPopulateBlockingSessionMetrics(t *testing.T) {
 		testMariaDBQuerySelection(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
 	})
 
-	// Test MariaDB normalization is applied during collection
-	t.Run("MariaDB_NormalizationApplied", func(t *testing.T) {
-		testMariaDBNormalizationApplied(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
+	// Test MariaDB anonymization is applied during collection
+	t.Run("MariaDB_AnonymizationApplied", func(t *testing.T) {
+		testMariaDBAnonymizationApplied(t, sqlxDB, mock, excludedDatabases, queryCountThreshold)
 	})
 }
 
@@ -201,12 +201,12 @@ func testMariaDBQuerySelection(t *testing.T, _ *sqlx.DB, _ sqlmock.Sqlmock, _ []
 		"MySQL query should not use information_schema.innodb_lock_waits")
 }
 
-func testMariaDBNormalizationApplied(t *testing.T, sqlxDB *sqlx.DB, sqlMock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int) {
+func testMariaDBAnonymizationApplied(t *testing.T, sqlxDB *sqlx.DB, sqlMock sqlmock.Sqlmock, excludedDatabases []string, queryCountThreshold int) {
 	mariaDBQuerySet := utils.GetQuerySet(utils.DatabaseFlavorMariaDB)
 
 	// Verify the flag is set
-	assert.True(t, mariaDBQuerySet.NeedsQueryNormalization,
-		"MariaDB query set must have NeedsQueryNormalization=true")
+	assert.True(t, mariaDBQuerySet.NeedsQueryAnonymization,
+		"MariaDB query set must have NeedsQueryAnonymization=true")
 
 	query, inputArgs, err := sqlx.In(mariaDBQuerySet.BlockingSessionsQuery, excludedDatabases, queryCountThreshold)
 	assert.NoError(t, err)
@@ -217,7 +217,7 @@ func testMariaDBNormalizationApplied(t *testing.T, sqlxDB *sqlx.DB, sqlMock sqlm
 		driverArgs[i] = driver.Value(v)
 	}
 
-	// Return rows with raw (un-normalized) SQL in blocked_query / blocking_query
+	// Return rows with raw (un-anonymized) SQL in blocked_query / blocking_query
 	rawSQL := "SELECT * FROM orders WHERE customer_id = 99 AND status = 'active'"
 	sqlMock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(driverArgs...).WillReturnRows(
 		sqlmock.NewRows([]string{
@@ -235,15 +235,15 @@ func testMariaDBNormalizationApplied(t *testing.T, sqlxDB *sqlx.DB, sqlMock sqlm
 	i, _ := integration.New("test", "1.0.0")
 	argList := arguments.ArgumentList{QueryMonitoringCountThreshold: queryCountThreshold}
 
-	// PopulateBlockingSessionMetrics should normalize blocked_query / blocking_query
-	// because mariaDBQuerySet.NeedsQueryNormalization == true
+	// PopulateBlockingSessionMetrics should anonymize blocked_query / blocking_query
+	// because mariaDBQuerySet.NeedsQueryAnonymization == true
 	PopulateBlockingSessionMetrics(dataSource, i, argList, excludedDatabases, mariaDBQuerySet)
 }
 
-// TestNormalizationAppliedToBlockingMetrics verifies that the normalization loop used inside
+// TestAnonymizationAppliedToBlockingMetrics verifies that the anonymization loop used inside
 // PopulateBlockingSessionMetrics correctly transforms raw trx_query values for MariaDB,
-// and that MySQL skips normalization entirely.
-func TestNormalizationAppliedToBlockingMetrics(t *testing.T) {
+// and that MySQL skips anonymization entirely.
+func TestAnonymizationAppliedToBlockingMetrics(t *testing.T) {
 	rawSQL := "SELECT * FROM users WHERE id = 42 AND name = 'Alice' AND token = 0xFF"
 	wantSQL := "SELECT * FROM users WHERE id = ? AND name = ? AND token = ?"
 
@@ -254,26 +254,26 @@ func TestNormalizationAppliedToBlockingMetrics(t *testing.T) {
 		},
 	}
 
-	t.Run("MariaDB_NormalizationTransformsRawSQL", func(t *testing.T) {
+	t.Run("MariaDB_AnonymizationTransformsRawSQL", func(t *testing.T) {
 		mariaDBQuerySet := utils.GetQuerySet(utils.DatabaseFlavorMariaDB)
-		assert.True(t, mariaDBQuerySet.NeedsQueryNormalization)
+		assert.True(t, mariaDBQuerySet.NeedsQueryAnonymization)
 
-		// Apply the same normalization loop as PopulateBlockingSessionMetrics
+		// Apply the same anonymization loop as PopulateBlockingSessionMetrics
 		for i := range metrics {
 			metrics[i].BlockedQuery = utils.NormalizeQueryText(metrics[i].BlockedQuery)
 			metrics[i].BlockingQuery = utils.NormalizeQueryText(metrics[i].BlockingQuery)
 		}
 
 		assert.Equal(t, wantSQL, *metrics[0].BlockedQuery,
-			"blocked_query should be normalized")
+			"blocked_query should be anonymized")
 		assert.Equal(t, wantSQL, *metrics[0].BlockingQuery,
-			"blocking_query should be normalized")
+			"blocking_query should be anonymized")
 	})
 
-	t.Run("MySQL_NormalizationFlagIsFalse", func(t *testing.T) {
+	t.Run("MySQL_AnonymizationFlagIsFalse", func(t *testing.T) {
 		mysqlQuerySet := utils.GetQuerySet(utils.DatabaseFlavorMySQL)
-		assert.False(t, mysqlQuerySet.NeedsQueryNormalization,
-			"MySQL DIGEST_TEXT is already normalized by performance_schema; no Go-side normalization needed")
+		assert.False(t, mysqlQuerySet.NeedsQueryAnonymization,
+			"MySQL DIGEST_TEXT is already anonymized by performance_schema; no Go-side anonymization needed")
 	})
 }
 

@@ -36,10 +36,10 @@ func PopulateBlockingSessionMetrics(db utils.DataSource, i *integration.Integrat
 		return
 	}
 
-	// Normalize query texts in Go — only needed for MariaDB, where the trx_query
+	// Anonymize query texts in Go — only needed for MariaDB, where the trx_query
 	// fallback returns raw SQL. MySQL always returns DIGEST_TEXT which is already
-	// normalized by performance_schema.
-	if querySet.NeedsQueryNormalization {
+	// anonymized by performance_schema.
+	if querySet.NeedsQueryAnonymization {
 		for i := range metrics {
 			metrics[i].BlockedQuery = utils.NormalizeQueryText(metrics[i].BlockedQuery)
 			metrics[i].BlockingQuery = utils.NormalizeQueryText(metrics[i].BlockingQuery)
